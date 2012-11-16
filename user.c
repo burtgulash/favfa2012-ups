@@ -16,7 +16,7 @@ int user_add(user **u, const char *name, int socket)
 	return 1;
 }
 
-user *user_get(user **u, const char *name)
+user *get_user_by_name(user **u, const char *name)
 {
 	user *i;
 
@@ -27,7 +27,18 @@ user *user_get(user **u, const char *name)
 	return NULL;
 }
 
-char *user_get_all(user **u)
+user *get_user_by_socket(user **u, int s)
+{
+	user *i;
+
+	for (i = *u; i != NULL; i = i->next)
+		if (i->socket == s)
+			return i;
+	
+	return NULL;
+}
+
+char *get_all_users(user **u)
 {
 	user *i;
 	int len, buflen;

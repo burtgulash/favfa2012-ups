@@ -37,6 +37,32 @@ char * cat_name_msg(const char *name, const char *msg)
 	return tmp;
 }
 
+typedef enum {LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
+
+char *receive_command(int s, void *buf, size_t len, command_t cmd)
+{
+	int bs;
+
+	if ((bs = recv(s, buf, len, 0)) <= 0)
+		return NULL;
+	
+	if (cmd == LOGIN && strncmp(buf, "LOGIN", 5) == 0) {
+		return buf + 6;
+	} if (cmd == LOGOUT && strncmp(buf, "LOGOUT", 6) == 0) {
+		return buf + 7;
+	} if (cmd == ALL_MSG && strncmp(buf, "ALL_MSG", 7) == 0) {
+		return buf + 8;
+	} if (cmd == PRIV_MSG && strncmp(buf, "PRIV_MSG", 8) == 0) {
+		return buf + 9;
+	} if (cmd == USERS && strncmp(buf, "USERS", 5) == 0) {
+		return buf + 6;
+	} if (cmd == PING && strncmp(buf, "PING", 4) == 0) {
+		return buf + 5;
+	}
+
+	return NULL;
+}
+
 int sendall(int s, const void *buf, size_t len, int flags) 
 {
 	size_t sent, left, n;
@@ -58,13 +84,13 @@ int main()
 	user *ui;
 
 	char *port = DEFAULT_PORT;
-	char msg_buf[MAX_DATA_SIZE];
-	char *tmp;
-	int listener_fd, new_fd;
+	char buf[MAX_DATA_SIZE];
+	char *tmp, *cmd;
+	int listener_fd, newfd;
 	int status;
 	int yes = 1;
 	int s;
-	int n_bytes;
+	int bs;
 	socklen_t addrlen;
 	struct addrinfo hints, *servinfo, *i;
 	struct sockaddr_storage their_addr;
@@ -136,47 +162,56 @@ int main()
 			if (FD_ISSET(s, &read_fds)) {
 				if (s == listener_fd) {
 					addrlen = sizeof their_addr;
-					new_fd = accept(listener_fd, 
+					newfd = accept(listener_fd, 
 									(struct sockaddr*) &their_addr, &addrlen);
 					
-					if (new_fd == -1)
-						perror("server: accept");
+					if (newfd == -1)
+						perror("accept");
 					else {
-						/* add test user. */
-						user_add(&users, "testovaci", new_fd);
-			// printf("user %s added.\n", "testovaci");
-						/* TODO login. */
-						FD_SET(new_fd, &master_fds);
-						if (new_fd > maxfd)
-							maxfd = new_fd;
+// TODO don't block by receive_command
+						if ((cmd = receive_command(newfd, buf, sizeof buf - 1, LOGIN))) {
+						// TODO send OK on successful LOGIN
+							tmp = (char *) malloc(sizeof(char) * (strlen(cmd) + 1));
+							strcpy(tmp, cmd);
+							// FIXME remove newline character?
+							// tmp[strlen(cmd)] = '\0';
+printf("adding user: %s\n", tmp); // Works!
+							user_add(&users, tmp, newfd);
+							FD_SET(newfd, &master_fds);
+							if (newfd > maxfd)
+								maxfd = newfd;
+						} else {
+								// TODO failed login, send ERR
+						}
 					}
-			// printf("server: got connection on socket %d\n", new_fd);
+			// printf("server: got connection on socket %d\n", newfd);
 				} else {
-					if ((n_bytes = 
-							recv(s, msg_buf, sizeof msg_buf, 0)) <= 0) {
-						if (n_bytes == 0)
+					if ((bs = recv(s, buf, sizeof buf - 1, 0)) <= 0) {
+						if (bs == 0)
 							fprintf(stderr, "socket %d hung up\n", s);
 						else
-							perror("server: recv");
+							perror("recv");
 
 						close(s);
 						FD_CLR(s, &master_fds);
 					} else
-						printf("received:: %d bytes.\n", n_bytes);
-						printf("received:: --<%s>--\n", msg_buf);
+						buf[bs] = '\0';
 						/* Send message to all online users. */
+						tmp = cat_name_msg(
+									get_user_by_socket(&users, s)->name, 
+									buf);
 						for (ui = users; ui != NULL; ui = ui->next) {
-							tmp = cat_name_msg(ui->name, msg_buf);
 
-				
-							if (send(ui->socket, tmp, strlen(tmp) + 1, 0) == -1) {
-								perror("server: message send");
+							// FIXME +1 should be there?
+							if (send(ui->socket, tmp, strlen(tmp)+1, 0) == -1) {
+								perror("message send");
 							} else {
-							printf("sent messgage::   %s\n", tmp);
+// printf("sending: :::%s:::\n", tmp);
+								// all good, message successfully sent
 							}
-
-							free(tmp);
 						}
+
+						free(tmp);
 				}
 			}
 		}
