@@ -67,14 +67,20 @@ char *get_all_users(user **u)
 	return buf;
 }
 
-int user_rm(user **u, const char *name)
+/*
+ * Remove user specified by name, socket or both.
+ * Place -1 for socket or NULL for name to omit them.
+ */
+int user_rm(user **u, const char *name, int s)
 {
 	user *i, *prev;
 
 	prev = NULL;
 
 	for (i = *u; i != NULL; i = i->next) {
-		if (strcmp(i->name, name) == 0) {
+		if ((s != -1 || name) 
+				&& (s == -1 || s == i->socket) 
+				&& (!name || strcmp(i->name, name) == 0)) {
 			if (prev)
 				prev->next = i->next;
 			else

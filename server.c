@@ -14,6 +14,19 @@
 #define BACKLOG 10
 #define MAX_DATA_SIZE 1024
 
+typedef enum {NIL, LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
+static int hangup = 0;
+static command_t cmd_set = NIL;
+
+void strip_nls(char *s)
+{
+	int i = strlen(s);
+
+	while (i > 0) {
+		s[--i] = '\0';
+	}
+}
+
 /*
  * Concatenates name and message together. Result must be freed after using.
  */
@@ -37,28 +50,40 @@ char * cat_name_msg(const char *name, const char *msg)
 	return tmp;
 }
 
-typedef enum {LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
 
-char *receive_command(int s, void *buf, size_t len, command_t cmd)
+char *recv_cmd(int s, void *buf, size_t len)
 {
 	int bs;
 
-	if ((bs = recv(s, buf, len, 0)) <= 0)
+	hangup = 0;
+	if ((bs = recv(s, buf, len, 0)) <= 0) {
+		if (bs == 0)
+			hangup = 1;
 		return NULL;
+	}
+	((char *)buf)[bs] = '\0';
 	
-	if (cmd == LOGIN && strncmp(buf, "LOGIN", 5) == 0) {
+	if (strncmp(buf, "LOGIN", 5) == 0) {
+		cmd_set = LOGIN;
 		return buf + 6;
-	} if (cmd == LOGOUT && strncmp(buf, "LOGOUT", 6) == 0) {
+	} if (strncmp(buf, "LOGOUT", 6) == 0) {
+		cmd_set = LOGOUT;
 		return buf + 7;
-	} if (cmd == ALL_MSG && strncmp(buf, "ALL_MSG", 7) == 0) {
+	} if (strncmp(buf, "ALL_MSG", 7) == 0) {
+		cmd_set = ALL_MSG;
 		return buf + 8;
-	} if (cmd == PRIV_MSG && strncmp(buf, "PRIV_MSG", 8) == 0) {
+	} if (strncmp(buf, "PRIV_MSG", 8) == 0) {
+		cmd_set = PRIV_MSG;
 		return buf + 9;
-	} if (cmd == USERS && strncmp(buf, "USERS", 5) == 0) {
+	} if (strncmp(buf, "USERS", 5) == 0) {
+		cmd_set = USERS;
 		return buf + 6;
-	} if (cmd == PING && strncmp(buf, "PING", 4) == 0) {
+	} if (strncmp(buf, "PING", 4) == 0) {
+		cmd_set = PING;
 		return buf + 5;
 	}
+// TODO OK
+// TODO ERR
 
 	return NULL;
 }
@@ -80,8 +105,10 @@ int sendall(int s, const void *buf, size_t len, int flags)
 
 int main()
 {
+	FILE *log;
+
 	user *users = NULL;
-	user *ui;
+	user *ui, *u;
 
 	char *port = DEFAULT_PORT;
 	char buf[MAX_DATA_SIZE];
@@ -95,9 +122,17 @@ int main()
 	struct addrinfo hints, *servinfo, *i;
 	struct sockaddr_storage their_addr;
 
-	fd_set master_fds, read_fds;
+	fd_set master_fds, tmp_fds;
 	int maxfd;
 
+
+	// TODO decide if append or write
+	log = fopen("server.log", "a");
+	if (log == NULL)
+		log = stdout;
+
+	// TODO remove 
+	log = stdout;
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
@@ -106,7 +141,7 @@ int main()
 
 
 	if ((status = getaddrinfo(NULL, port, &hints, &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));	
+		fprintf(log, "getaddrinfo: %s\n", gai_strerror(status));	
 		exit(1);
 	}
 
@@ -138,7 +173,7 @@ int main()
 	freeaddrinfo(servinfo);
 
 	if (i == NULL) {
-		fprintf(stderr, "server: failed to bind\n");
+		fprintf(log, "server: failed to bind\n");
 		exit(2);
 	}
 
@@ -152,14 +187,14 @@ int main()
 	FD_SET(listener_fd, &master_fds);
 
 	while (1) {
-		read_fds = master_fds;
-		if (select(maxfd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+		tmp_fds = master_fds;
+		if (select(maxfd + 1, &tmp_fds, NULL, NULL, NULL) == -1) {
 			perror("server: select");
 			exit(3);
 		}
 
 		for (s = 0; s <= maxfd; s++) {
-			if (FD_ISSET(s, &read_fds)) {
+			if (FD_ISSET(s, &tmp_fds)) {
 				if (s == listener_fd) {
 					addrlen = sizeof their_addr;
 					newfd = accept(listener_fd, 
@@ -168,50 +203,89 @@ int main()
 					if (newfd == -1)
 						perror("accept");
 					else {
-// TODO don't block by receive_command
-						if ((cmd = receive_command(newfd, buf, sizeof buf - 1, LOGIN))) {
-						// TODO send OK on successful LOGIN
-							tmp = (char *) malloc(sizeof(char) * (strlen(cmd) + 1));
-							strcpy(tmp, cmd);
-							// FIXME remove newline character?
-							// tmp[strlen(cmd)] = '\0';
-printf("adding user: %s\n", tmp); // Works!
-							user_add(&users, tmp, newfd);
-							FD_SET(newfd, &master_fds);
-							if (newfd > maxfd)
-								maxfd = newfd;
-						} else {
-								// TODO failed login, send ERR
-						}
+						FD_SET(newfd, &master_fds);
+						if (newfd > maxfd)
+							maxfd = newfd;
 					}
-			// printf("server: got connection on socket %d\n", newfd);
-				} else {
-					if ((bs = recv(s, buf, sizeof buf - 1, 0)) <= 0) {
-						if (bs == 0)
-							fprintf(stderr, "socket %d hung up\n", s);
-						else
-							perror("recv");
-
-						close(s);
+				} else if (get_user_by_socket(&users, s) == NULL) {
+					cmd = recv_cmd(s, buf, sizeof buf - 1);
+					if (cmd_set == LOGIN && cmd != NULL) {
+						// TODO send OK on successful LOGIN
+						tmp = (char *) malloc(sizeof(char) * (strlen(cmd) + 1));
+						// FIXME necessary for custom client? 
+						// strip_nls(cmd);
+						strcpy(tmp, cmd);
+						// FIXME remove newline character?
+						// tmp[strlen(cmd)] = '\0';
+						user_add(&users, tmp, s);
+						fprintf(log, "%d User added: \"%s\"\n", s, tmp);
+					} else {
+						// TODO failed login, send ERR, 
 						FD_CLR(s, &master_fds);
-					} else
-						buf[bs] = '\0';
-						/* Send message to all online users. */
-						tmp = cat_name_msg(
-									get_user_by_socket(&users, s)->name, 
-									buf);
-						for (ui = users; ui != NULL; ui = ui->next) {
+						fprintf(log, "%d Failed login\n", s);
+					}
+				} else {
+					cmd = recv_cmd(s, buf, sizeof buf - 1);
+					if (cmd != NULL) {
+						u = get_user_by_socket(&users, s);
+						tmp = cat_name_msg(u->name, cmd);
 
-							// FIXME +1 should be there?
-							if (send(ui->socket, tmp, strlen(tmp)+1, 0) == -1) {
-								perror("message send");
-							} else {
-// printf("sending: :::%s:::\n", tmp);
-								// all good, message successfully sent
+						switch(cmd_set) {
+						case ALL_MSG:
+							for (ui = users; ui != NULL; ui = ui->next) {
+
+								// FIXME +1 should be there?
+								if (send(ui->socket, tmp, 
+										strlen(tmp) + 1, 0) == -1) {
+									perror("message send");
+									// TODO send ERR
+								} else {
+									fprintf(log, 
+										"%d message from %s to %s: %s\n", 
+										u->socket, u->name, ui->name, tmp);
+									// all good, message successfully sent
+									// TODO send OK
+									break;
+								}
 							}
+							// TODO send ERR, already broke if successful
+							break;
+
+						// TODO bugged as shit
+						case PRIV_MSG:
+							tmp = strtok(cmd, " ");						
+							if (tmp != NULL) {
+								u = get_user_by_socket(&users, s);
+								ui = get_user_by_name(&users, tmp);
+
+								tmp = strtok(NULL, " ");
+								if (ui != NULL) {
+									// FIXME +1 should be there?
+									if (send(ui->socket, tmp, 
+											strlen(tmp) + 1, 0) == -1) {
+										perror("message send");
+									} else {
+										// all good, message successfully sent
+										// TODO send OK
+										fprintf(log, 
+											"%d message from %s to %s: %s\n", 
+											u->socket, u->name, ui->name, tmp);
+										break;
+									}
+								}
+							}
+							// TODO send ERR, already broke if successful
+							break;
 						}
 
 						free(tmp);
+					} else if (hangup) {
+						// TODO disconnect user, remove from master_fds
+						close(s);
+						FD_CLR(s, &master_fds);
+						user_rm(&users, NULL, s);
+						fprintf(log, "%d hung up\n", s);
+					}
 				}
 			}
 		}
