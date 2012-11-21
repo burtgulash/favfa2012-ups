@@ -24,13 +24,13 @@ static FILE *log;
 
 static void send_ok(int s)
 {
-	if (send(s, "OK", 2, 0) == -1)
+	if (send(s, "OK\n", 3, 0) == -1)
 		perror("OK not sent");
 }
 
 static void send_err(int s)
 {
-	if (send(s, "ERR", 3, 0) == -1)
+	if (send(s, "ERR\n", 4, 0) == -1)
 		perror("ERR not sent");
 }
 
@@ -64,17 +64,25 @@ static char *cat_name_msg(const char *name, const char *msg)
 	len_msg = strlen(msg);
 	len_tmp = len_name + 2 + len_msg;
 
-	tmp = (char*) malloc(sizeof(char) * (len_tmp + 1));
+	tmp = (char*) malloc(sizeof(char) * (len_tmp + 2));
 	strncpy(tmp, name, len_name);
 	strncpy(tmp + len_name + 2, msg, len_msg);
 
 	tmp[len_name] = ':';
 	tmp[len_name + 1] = ' ';
-	tmp[len_tmp] = '\0';
+	tmp[len_tmp] = '\n';
+	tmp[len_tmp + 1] = '\0';
 
 	return tmp;
 }
 
+void strip_nls(char *buf)
+{
+	char *p = buf + strlen(buf) - 1;
+
+	while (p && (*p == '\r' || *p == '\n'))
+		*p-- = '\0';
+}
 
 static char *recv_cmd(int s, void *buf, size_t len, command_t *cmd_set, int *hangup)
 {
@@ -86,7 +94,9 @@ static char *recv_cmd(int s, void *buf, size_t len, command_t *cmd_set, int *han
 			*hangup = 1;
 		return NULL;
 	}
+
 	((char *)buf)[bs] = '\0';
+	strip_nls(buf);
 	
 	if (strncmp(buf, "LOGIN", 5) == 0) {
 		*cmd_set = LOGIN;
@@ -261,11 +271,10 @@ int main()
 								free(broken);
 							}
 						}
+
 						break;
 					} else {
-						user *user_to_logout;
-						char *name_msg = cat_name_msg(from->name, stripped);
-						char *c;
+						char *name_msg;
 
 						switch(cmd_set) {
 							case LOGIN:
@@ -273,8 +282,8 @@ int main()
 								break;
 
 
-							case LOGOUT:
-								user_to_logout = user_rm(&users, from->name, &from->socket);
+							case LOGOUT:;
+								user *user_to_logout = user_rm(&users, from->name, &from->socket);
 								if (user_to_logout) {
 									free(user_to_logout->name);
 									free(user_to_logout);
@@ -289,42 +298,66 @@ int main()
 								break;
 
 
-							case USERS:
+							case USERS:;
+								user *i;
+								int len, buflen;
+								char *tmp_buf, *p;
+
+								len = buflen = 0;
+
+								for (i = users; i != NULL; i = i->next) {
+									len ++;
+									buflen += strlen(i->name);
+
+									/* Account for a newline between names. */
+									if (len > 1)
+										buflen ++;
+								}
+
+								tmp_buf = p = (char*) malloc(buflen + 1);
+
+								for (i = users; i != NULL; i = i->next) {
+									strcpy(p, i->name);
+									p += strlen(i->name);
+									*p++ = '\n';
+								}
+								*p = '\0';
+
 								// TODO new buffer, then split to more sends
-								sprintf(buf, "%s", get_all_users(&users));
-								if (send(s, buf, strlen(buf), 0) == -1)
-									perror("message send");
+								send_to_user(from, from, tmp_buf, strlen(tmp_buf));
+
+								free(tmp_buf);
 								break;
 
 
-							case ALL_MSG:
+							case ALL_MSG:;
+								name_msg = cat_name_msg(from->name, stripped);
 								send_to_all(&users, from, name_msg, strlen(name_msg));
+								free(name_msg);
 								break;
 
 
-							case PRIV_MSG:
-								c = strtok(stripped, " ");						
+							case PRIV_MSG:;
+								char *c = strtok(stripped, " ");						
 								if (c == NULL)
 									break;
 
-printf("user: :::%s:::\n", c);
 								user *recipient = get_user(&users, c, NULL);
 								if (recipient == NULL) {
-printf("proc null?\n");
 									send_err(from->socket);
 									break;
 								}
 								c = strtok(NULL, " ");
 
-								send_to_user(from, recipient, c, strlen(c));
+								name_msg = cat_name_msg(from->name, c);
+								send_to_user(from, recipient, name_msg, strlen(name_msg));
+								free(name_msg);
 								break;
 
 							default:
 								assert(0);
 								// Shouldn't get here
 						}
-
-						free(name_msg);
 					}
 				}
 			}
