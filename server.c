@@ -15,17 +15,26 @@
 #define MAX_DATA_SIZE 1024
 
 typedef enum {NIL, LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
-static int hangup = 0;
-static command_t cmd_set = NIL;
 
-void strip_nls(char *s)
+void send_to_user(user *recipient, const void *buf, size_t len)
 {
-	int i = strlen(s);
-
-	while (i > 0) {
-		s[--i] = '\0';
+	if (send(recipient->socket, buf, len, 0) == -1) {
+		perror("message send");
+		// TODO send ERR
+	} else {
+		// TODO OK
+		// TODO log
 	}
 }
+
+void send_to_all(user **users, const void *buf, size_t len) 
+{
+	user *i;
+
+	for (i = *users; i != NULL; i = i->next)
+		send_to_user(i, buf, len);
+}
+
 
 /*
  * Concatenates name and message together. Result must be freed after using.
@@ -51,40 +60,39 @@ char * cat_name_msg(const char *name, const char *msg)
 }
 
 
-char *recv_cmd(int s, void *buf, size_t len)
+char *recv_cmd(int s, void *buf, size_t len, command_t *cmd_set, int *hangup)
 {
 	int bs;
 
-	hangup = 0;
+	*hangup = 0;
 	if ((bs = recv(s, buf, len, 0)) <= 0) {
 		if (bs == 0)
-			hangup = 1;
+			*hangup = 1;
 		return NULL;
 	}
 	((char *)buf)[bs] = '\0';
 	
 	if (strncmp(buf, "LOGIN", 5) == 0) {
-		cmd_set = LOGIN;
+		*cmd_set = LOGIN;
 		return buf + 6;
 	} if (strncmp(buf, "LOGOUT", 6) == 0) {
-		cmd_set = LOGOUT;
+		*cmd_set = LOGOUT;
 		return buf + 7;
 	} if (strncmp(buf, "ALL_MSG", 7) == 0) {
-		cmd_set = ALL_MSG;
+		*cmd_set = ALL_MSG;
 		return buf + 8;
 	} if (strncmp(buf, "PRIV_MSG", 8) == 0) {
-		cmd_set = PRIV_MSG;
+		*cmd_set = PRIV_MSG;
 		return buf + 9;
 	} if (strncmp(buf, "USERS", 5) == 0) {
-		cmd_set = USERS;
+		*cmd_set = USERS;
 		return buf + 6;
 	} if (strncmp(buf, "PING", 4) == 0) {
-		cmd_set = PING;
+		*cmd_set = PING;
 		return buf + 5;
 	}
-// TODO OK
-// TODO ERR
 
+	*cmd_set = NIL;
 	return NULL;
 }
 
@@ -106,24 +114,24 @@ int sendall(int s, const void *buf, size_t len, int flags)
 int main()
 {
 	FILE *log;
+	char *port = DEFAULT_PORT;
 
 	user *users = NULL;
-	user *ui, *u;
-
-	char *port = DEFAULT_PORT;
 	char buf[MAX_DATA_SIZE];
-	char *tmp, *cmd;
-	int listener_fd, newfd;
-	int status;
-	int yes = 1;
-	int s;
-	int bs;
+
 	socklen_t addrlen;
 	struct addrinfo hints, *servinfo, *i;
 	struct sockaddr_storage their_addr;
 
 	fd_set master_fds, tmp_fds;
 	int maxfd;
+
+	int s;
+	int listener_fd, newfd;
+	int hangup;
+	int bs;
+	int yes = 1;
+	command_t cmd_set;
 
 
 	// TODO decide if append or write
@@ -140,6 +148,7 @@ int main()
 	hints.ai_flags = AI_PASSIVE;
 
 
+	int status;
 	if ((status = getaddrinfo(NULL, port, &hints, &servinfo)) != 0) {
 		fprintf(log, "getaddrinfo: %s\n", gai_strerror(status));	
 		exit(1);
@@ -208,83 +217,67 @@ int main()
 							maxfd = newfd;
 					}
 				} else if (get_user_by_socket(&users, s) == NULL) {
-					cmd = recv_cmd(s, buf, sizeof buf - 1);
-					if (cmd_set == LOGIN && cmd != NULL) {
+					char *stripped = recv_cmd(s, buf, sizeof buf - 1, &cmd_set, &hangup);
+					if (cmd_set == LOGIN && stripped != NULL) {
 						// TODO send OK on successful LOGIN
-						tmp = (char *) malloc(sizeof(char) * (strlen(cmd) + 1));
+						char *tmp = (char *) malloc(sizeof(char) * (strlen(stripped) + 1));
 						// FIXME necessary for custom client? 
-						// strip_nls(cmd);
-						strcpy(tmp, cmd);
+						// strip_nls(stripped);
+						strcpy(tmp, stripped);
 						// FIXME remove newline character?
-						// tmp[strlen(cmd)] = '\0';
+						// tmp[strlen(stripped)] = '\0';
 						user_add(&users, tmp, s);
 						fprintf(log, "%d User added: \"%s\"\n", s, tmp);
 					} else {
 						// TODO failed login, send ERR, 
-						FD_CLR(s, &master_fds);
+						// FD_CLR(s, &master_fds);
 						fprintf(log, "%d Failed login\n", s);
 					}
 				} else {
-					cmd = recv_cmd(s, buf, sizeof buf - 1);
-					if (cmd != NULL) {
-						u = get_user_by_socket(&users, s);
-						tmp = cat_name_msg(u->name, cmd);
+					char *stripped = recv_cmd(s, buf, sizeof buf - 1, &cmd_set, &hangup);
+
+					if (stripped == NULL) {
+						if (hangup) {
+							close(s);
+							FD_CLR(s, &master_fds);
+							user_rm(&users, NULL, s);
+							fprintf(log, "%d hung up\n", s);
+						}
+						break;
+					} else {
+						user *u = get_user_by_socket(&users, s);
+						char *name_msg = cat_name_msg(u->name, stripped);
+						char *c;
 
 						switch(cmd_set) {
-						case ALL_MSG:
-							for (ui = users; ui != NULL; ui = ui->next) {
+						case USERS:
+							// TODO new buffer, then split to more sends
+							sprintf(buf, "%s", get_all_users(&users));
+							if (send(s, buf, strlen(buf) + 1, 0) == -1)
+								perror("message send");
+							break;
 
-								// FIXME +1 should be there?
-								if (send(ui->socket, tmp, 
-										strlen(tmp) + 1, 0) == -1) {
-									perror("message send");
-									// TODO send ERR
-								} else {
-									fprintf(log, 
-										"%d message from %s to %s: %s\n", 
-										u->socket, u->name, ui->name, tmp);
-									// all good, message successfully sent
-									// TODO send OK
-									break;
-								}
-							}
-							// TODO send ERR, already broke if successful
+						case ALL_MSG:
+							send_to_all(&users, name_msg, strlen(name_msg + 1));
 							break;
 
 						// TODO bugged as shit
 						case PRIV_MSG:
-							tmp = strtok(cmd, " ");						
-							if (tmp != NULL) {
-								u = get_user_by_socket(&users, s);
-								ui = get_user_by_name(&users, tmp);
-
-								tmp = strtok(NULL, " ");
-								if (ui != NULL) {
-									// FIXME +1 should be there?
-									if (send(ui->socket, tmp, 
-											strlen(tmp) + 1, 0) == -1) {
-										perror("message send");
-									} else {
-										// all good, message successfully sent
-										// TODO send OK
-										fprintf(log, 
-											"%d message from %s to %s: %s\n", 
-											u->socket, u->name, ui->name, tmp);
-										break;
-									}
-								}
+							c = strtok(stripped, " ");						
+							if (c == NULL)
+								break;
+							user *recipient = get_user_by_name(&users, c);
+							if (recipient == NULL) {
+								// User doesn't exist!
+								break;
 							}
-							// TODO send ERR, already broke if successful
+							c = strtok(NULL, " ");
+
+							send_to_user(recipient, c, strlen(c) + 1);
 							break;
 						}
 
-						free(tmp);
-					} else if (hangup) {
-						// TODO disconnect user, remove from master_fds
-						close(s);
-						FD_CLR(s, &master_fds);
-						user_rm(&users, NULL, s);
-						fprintf(log, "%d hung up\n", s);
+						free(name_msg);
 					}
 				}
 			}
