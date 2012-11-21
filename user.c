@@ -16,23 +16,14 @@ int user_add(user **u, const char *name, int socket)
 	return 1;
 }
 
-user *get_user_by_name(user **u, const char *name)
+user *get_user(user **u, const char *name, int *s)
 {
 	user *i;
 
 	for (i = *u; i != NULL; i = i->next)
-		if (strcmp(i->name, name) == 0)
-			return i;
-	
-	return NULL;
-}
-
-user *get_user_by_socket(user **u, int s)
-{
-	user *i;
-
-	for (i = *u; i != NULL; i = i->next)
-		if (i->socket == s)
+		if ((s || name) 
+				&& (!s    || *s == i->socket) 
+				&& (!name || strcmp(i->name, name) == 0)) 
 			return i;
 	
 	return NULL;
@@ -67,35 +58,31 @@ char *get_all_users(user **u)
 	return buf;
 }
 
-/*
- * Remove user specified by name, socket or both.
- * Place -1 for socket or NULL for name to omit them.
- */
-int user_rm(user **u, const char *name, int s)
+user *user_rm(user **u, const char *name, int *s)
 {
 	user *i, *prev;
 
 	prev = NULL;
 
 	for (i = *u; i != NULL; i = i->next) {
-		if ((s != -1 || name) 
-				&& (s == -1 || s == i->socket) 
-				&& (!name || strcmp(i->name, name) == 0)) {
+		if ((s || name) 
+				&& (!s    || *s == i->socket) 
+				&& (!name || strcmp(i->name, name) == 0)) 
+		{
 			if (prev)
 				prev->next = i->next;
 			else
 				*u = i->next;
 
-			free(i->name);
-			free(i);
+			i->next = NULL;
 	
-			return 1;
+			return i;
 		}
 		
 		prev = i;
 	}
 	
-	return 0;
+	return NULL;
 }
 
 int user_rm_all(user **u)

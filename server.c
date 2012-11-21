@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <assert.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -16,30 +18,44 @@
 
 typedef enum {NIL, LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
 
-void send_to_user(user *recipient, const void *buf, size_t len)
+static FILE *log;
+
+
+
+static void send_ok(int s)
 {
-	if (send(recipient->socket, buf, len, 0) == -1) {
-		perror("message send");
-		// TODO send ERR
-	} else {
-		// TODO OK
-		// TODO log
-	}
+	if (send(s, "OK", 2, 0) == -1)
+		perror("OK not sent");
 }
 
-void send_to_all(user **users, const void *buf, size_t len) 
+static void send_err(int s)
+{
+	if (send(s, "ERR", 3, 0) == -1)
+		perror("ERR not sent");
+}
+
+static void send_to_user(user *from, user *to, const void *buf, size_t len)
+{
+	if (send(to->socket, buf, len, 0) == -1) {
+		perror("message send");
+		send_err(from->socket);
+	} else 
+		send_ok(from->socket);
+}
+
+static void send_to_all(user **users, user *from, const void *buf, size_t len) 
 {
 	user *i;
 
 	for (i = *users; i != NULL; i = i->next)
-		send_to_user(i, buf, len);
+		send_to_user(from, i, buf, len);
 }
 
 
 /*
  * Concatenates name and message together. Result must be freed after using.
  */
-char * cat_name_msg(const char *name, const char *msg)
+static char *cat_name_msg(const char *name, const char *msg)
 {
 	size_t len_name, len_msg, len_tmp;
 	char *tmp;
@@ -60,7 +76,7 @@ char * cat_name_msg(const char *name, const char *msg)
 }
 
 
-char *recv_cmd(int s, void *buf, size_t len, command_t *cmd_set, int *hangup)
+static char *recv_cmd(int s, void *buf, size_t len, command_t *cmd_set, int *hangup)
 {
 	int bs;
 
@@ -96,7 +112,7 @@ char *recv_cmd(int s, void *buf, size_t len, command_t *cmd_set, int *hangup)
 	return NULL;
 }
 
-int sendall(int s, const void *buf, size_t len, int flags) 
+static int sendall(int s, const void *buf, size_t len, int flags) 
 {
 	size_t sent, left, n;
 	
@@ -113,7 +129,6 @@ int sendall(int s, const void *buf, size_t len, int flags)
 
 int main()
 {
-	FILE *log;
 	char *port = DEFAULT_PORT;
 
 	user *users = NULL;
@@ -129,12 +144,11 @@ int main()
 	int s;
 	int listener_fd, newfd;
 	int hangup;
-	int bs;
-	int yes = 1;
 	command_t cmd_set;
 
 
-	// TODO decide if append or write
+
+
 	log = fopen("server.log", "a");
 	if (log == NULL)
 		log = stdout;
@@ -164,6 +178,7 @@ int main()
 
 		maxfd = listener_fd;
 
+		int yes = 1;
 		if (setsockopt(listener_fd, SOL_SOCKET, SO_REUSEADDR, 
 						&yes, sizeof(int)) == -1) {
 			perror("server: setsockopt");
@@ -204,6 +219,8 @@ int main()
 
 		for (s = 0; s <= maxfd; s++) {
 			if (FD_ISSET(s, &tmp_fds)) {
+				user *from = get_user(&users, NULL, &s);
+
 				if (s == listener_fd) {
 					addrlen = sizeof their_addr;
 					newfd = accept(listener_fd, 
@@ -216,23 +233,20 @@ int main()
 						if (newfd > maxfd)
 							maxfd = newfd;
 					}
-				} else if (get_user_by_socket(&users, s) == NULL) {
+				} else if (from == NULL) {
 					char *stripped = recv_cmd(s, buf, sizeof buf - 1, &cmd_set, &hangup);
+
 					if (cmd_set == LOGIN && stripped != NULL) {
-						// TODO send OK on successful LOGIN
-						char *tmp = (char *) malloc(sizeof(char) * (strlen(stripped) + 1));
-						// FIXME necessary for custom client? 
-						// strip_nls(stripped);
-						strcpy(tmp, stripped);
-						// FIXME remove newline character?
-						// tmp[strlen(stripped)] = '\0';
-						user_add(&users, tmp, s);
-						fprintf(log, "%d User added: \"%s\"\n", s, tmp);
-					} else {
-						// TODO failed login, send ERR, 
-						// FD_CLR(s, &master_fds);
-						fprintf(log, "%d Failed login\n", s);
-					}
+						char *user_name = (char *) malloc(sizeof(char) * (strlen(stripped) + 1));
+						strcpy(user_name, stripped);
+
+						if (user_name && strlen(user_name) > 0) {
+							user_add(&users, user_name, s);
+							send_ok(s);
+						} else 
+							send_err(s);
+					} else
+						send_err(s);
 				} else {
 					char *stripped = recv_cmd(s, buf, sizeof buf - 1, &cmd_set, &hangup);
 
@@ -240,41 +254,74 @@ int main()
 						if (hangup) {
 							close(s);
 							FD_CLR(s, &master_fds);
-							user_rm(&users, NULL, s);
-							fprintf(log, "%d hung up\n", s);
+
+							user *broken = user_rm(&users, NULL, &s);
+							if (broken) {
+								free(broken->name);
+								free(broken);
+							}
 						}
 						break;
 					} else {
-						user *u = get_user_by_socket(&users, s);
-						char *name_msg = cat_name_msg(u->name, stripped);
+						user *user_to_logout;
+						char *name_msg = cat_name_msg(from->name, stripped);
 						char *c;
 
 						switch(cmd_set) {
-						case USERS:
-							// TODO new buffer, then split to more sends
-							sprintf(buf, "%s", get_all_users(&users));
-							if (send(s, buf, strlen(buf) + 1, 0) == -1)
-								perror("message send");
-							break;
-
-						case ALL_MSG:
-							send_to_all(&users, name_msg, strlen(name_msg + 1));
-							break;
-
-						// TODO bugged as shit
-						case PRIV_MSG:
-							c = strtok(stripped, " ");						
-							if (c == NULL)
+							case LOGIN:
+								send_err(from->socket);
 								break;
-							user *recipient = get_user_by_name(&users, c);
-							if (recipient == NULL) {
-								// User doesn't exist!
-								break;
-							}
-							c = strtok(NULL, " ");
 
-							send_to_user(recipient, c, strlen(c) + 1);
-							break;
+
+							case LOGOUT:
+								user_to_logout = user_rm(&users, from->name, &from->socket);
+								if (user_to_logout) {
+									free(user_to_logout->name);
+									free(user_to_logout);
+									send_ok(s);
+								} else 
+									send_err(s);
+								break;
+
+
+							case PING:
+								send_ok(from->socket);
+								break;
+
+
+							case USERS:
+								// TODO new buffer, then split to more sends
+								sprintf(buf, "%s", get_all_users(&users));
+								if (send(s, buf, strlen(buf), 0) == -1)
+									perror("message send");
+								break;
+
+
+							case ALL_MSG:
+								send_to_all(&users, from, name_msg, strlen(name_msg));
+								break;
+
+
+							case PRIV_MSG:
+								c = strtok(stripped, " ");						
+								if (c == NULL)
+									break;
+
+printf("user: :::%s:::\n", c);
+								user *recipient = get_user(&users, c, NULL);
+								if (recipient == NULL) {
+printf("proc null?\n");
+									send_err(from->socket);
+									break;
+								}
+								c = strtok(NULL, " ");
+
+								send_to_user(from, recipient, c, strlen(c));
+								break;
+
+							default:
+								assert(0);
+								// Shouldn't get here
 						}
 
 						free(name_msg);
