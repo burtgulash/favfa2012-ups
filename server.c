@@ -342,7 +342,7 @@ int main()
 						case USERS:;
 							user *i;
 							int len, buflen;
-							char *tmp_buf, *p;
+							char *tmp_buf, *p, *res;
 
 							len = buflen = 0;
 
@@ -361,9 +361,14 @@ int main()
 							}
 							*(p - 1) = '\0';
 							
-							send_ok(from->socket);
+							res = concatenate(3, "USERS ", tmp_buf, "\n");
+							if(send_to_user(from, from, res, strlen(res)))
+								send_ok(from->socket);
+							else
+								send_err(from->socket);
 
 							free(tmp_buf);
+							free(res);
 							break;
 
 
