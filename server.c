@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 #include <errno.h>
 #include <assert.h>
 #include <unistd.h>
@@ -16,50 +17,11 @@
 #define DEFAULT_PORT "1234"
 #define BACKLOG 10
 #define MAX_DATA_SIZE 1024
+#define ID_SIZE 3
 
 typedef enum {NIL, LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
 
 static FILE *log;
-
-
-
-static void send_ok(int s)
-{
-	if (send(s, "OK\n", 3, 0) == -1)
-		perror("OK not sent");
-}
-
-static void send_err(int s)
-{
-	if (send(s, "ERR\n", 4, 0) == -1)
-		perror("ERR not sent");
-}
-
-static void send_to_user(user *from, user *to, const void *buf, size_t len)
-{
-	if (send(to->socket, buf, len, 0) == -1) {
-		perror("message send");
-		send_err(from->socket);
-	} else 
-		send_ok(from->socket);
-}
-
-static void send_to_all(user **users, user *from, const void *buf, size_t len) 
-{
-	user *i;
-	int all_good = 1;
-
-	for (i = *users; i != NULL; i = i->next)
-		if (send(i->socket, buf, len, 0) == -1) {
-			perror("message send");
-			all_good = 0;
-		}
-
-	if (all_good)
-		send_ok(from->socket);
-	else
-		send_err(from->socket);
-}
 
 
 /*
@@ -96,6 +58,51 @@ static char *concatenate(int n, ...)
 	return res;
 }
 
+static void send_ok(int s, char *id_buf, char *response)
+{
+	char *tmp = concatenate(4, id_buf, " OK ", response, "\n");
+
+	if (send(s, tmp, strlen(tmp), 0) == -1)
+		perror("OK not sent");
+
+	free(tmp);
+}
+
+static void send_err(int s, char *id_buf)
+{
+	char *tmp = concatenate(3, id_buf, " ERR ", "\n");
+
+	if (send(s, tmp, strlen(tmp), 0) == -1)
+		perror("ERR not sent");
+
+	free(tmp);
+}
+
+static int send_to_user(user *from, user *to, const void *buf, size_t len)
+{
+	if (send(to->socket, buf, len, 0) == -1) {
+		perror("message send");
+		return 0;
+	} else 
+		return 1;
+}
+
+static int send_to_all(user **users, user *from, const void *buf, size_t len) 
+{
+	user *i;
+	int all_good = 1;
+
+	for (i = *users; i != NULL; i = i->next)
+		if (send(i->socket, buf, len, 0) == -1) {
+			perror("message send");
+			all_good = 0;
+		}
+
+	return all_good;
+}
+
+
+
 void strip_nls(char *buf)
 {
 	char *p = buf + strlen(buf) - 1;
@@ -104,7 +111,7 @@ void strip_nls(char *buf)
 		*p-- = '\0';
 }
 
-static char *recv_cmd(int s, void *buf, size_t len, command_t *cmd_set, int *hangup)
+static char *parse_request(int s, char *buf, size_t len, char *id_buf, command_t *cmd_set, int *hangup)
 {
 	int bs;
 
@@ -117,28 +124,39 @@ static char *recv_cmd(int s, void *buf, size_t len, command_t *cmd_set, int *han
 
 	((char *)buf)[bs] = '\0';
 	strip_nls(buf);
+
+	strncpy(id_buf, buf, ID_SIZE);
+	id_buf[ID_SIZE] = '\0';
+
+	buf += ID_SIZE;
+	while (isspace(*buf))
+		buf++;
 	
+	*cmd_set = NIL;
 	if (strncmp(buf, "LOGIN", 5) == 0) {
 		*cmd_set = LOGIN;
-		return buf + 6;
+		buf += 5;
 	} if (strncmp(buf, "LOGOUT", 6) == 0) {
 		*cmd_set = LOGOUT;
-		return buf + 7;
+		buf += 6;
 	} if (strncmp(buf, "ALL_MSG", 7) == 0) {
 		*cmd_set = ALL_MSG;
-		return buf + 8;
+		buf += 7;
 	} if (strncmp(buf, "PRIV_MSG", 8) == 0) {
 		*cmd_set = PRIV_MSG;
-		return buf + 9;
+		buf += 8;
 	} if (strncmp(buf, "USERS", 5) == 0) {
 		*cmd_set = USERS;
-		return buf + 6;
+		buf += 5;
 	} if (strncmp(buf, "PING", 4) == 0) {
 		*cmd_set = PING;
-		return buf + 5;
+		buf += 4;
 	}
+	while (isspace(*buf))
+		buf++;
 
-	*cmd_set = NIL;
+	if (*cmd_set != NIL)
+		return buf;
 	return NULL;
 }
 
@@ -162,7 +180,9 @@ int main()
 	char *port = DEFAULT_PORT;
 
 	user *users = NULL;
-	char buf[MAX_DATA_SIZE];
+	char buf[MAX_DATA_SIZE + 1];
+	char id_buf[ID_SIZE + 1];
+	char foreign_id[ID_SIZE + 1];
 
 	socklen_t addrlen;
 	struct addrinfo hints, *servinfo, *i;
@@ -178,6 +198,8 @@ int main()
 
 
 
+	memset(foreign_id, '_', sizeof foreign_id);
+	foreign_id[ID_SIZE] = '\0';
 
 	log = fopen("server.log", "a");
 	if (log == NULL)
@@ -250,6 +272,7 @@ int main()
 		for (s = 0; s <= maxfd; s++) {
 			if (FD_ISSET(s, &tmp_fds)) {
 				user *from = get_user(&users, NULL, &s);
+				memset(id_buf, 0, ID_SIZE + 1);
 
 				if (s == listener_fd) {
 					addrlen = sizeof their_addr;
@@ -264,13 +287,13 @@ int main()
 							maxfd = newfd;
 					}
 				} else if (from == NULL) {
-					char *stripped = recv_cmd(s, buf, sizeof buf - 1, &cmd_set, &hangup);
+					char *stripped = parse_request(s, buf, sizeof buf - 1, id_buf, &cmd_set, &hangup);
 					if (stripped == NULL) {
 						if (hangup) {
 							close(s);
 							FD_CLR(s, &master_fds);
 						} else
-							send_err(s);
+							send_err(s, id_buf);
 
 						break;
 					}
@@ -284,15 +307,15 @@ int main()
 							&& get_user(&users, user_name, NULL) == NULL) 
 						{
 							user_add(&users, user_name, s);
-							send_ok(s);
+							send_ok(s, id_buf, "");
 						} else {
 							free(user_name);
-							send_err(s);
+							send_err(s, id_buf);
 						}
 					} else
-						send_err(s);
+						send_err(s, id_buf);
 				} else {
-					char *stripped = recv_cmd(s, buf, sizeof buf - 1, &cmd_set, &hangup);
+					char *stripped = parse_request(s, buf, sizeof buf - 1, id_buf, &cmd_set, &hangup);
 
 					if (stripped == NULL) {
 						if (hangup) {
@@ -305,16 +328,16 @@ int main()
 								free(broken);
 							}
 						} else
-							send_err(from->socket);
+							send_err(from->socket, id_buf);
 
 						break;
 					}
 
-					char *from_msg;
+					char *from_msg, *to_msg;
 
 					switch(cmd_set) {
 						case LOGIN:
-							send_err(from->socket);
+							send_err(from->socket, id_buf);
 							break;
 
 
@@ -323,21 +346,21 @@ int main()
 							if (user_to_logout) {
 								free(user_to_logout->name);
 								free(user_to_logout);
-								send_ok(s);
+								send_ok(s, id_buf, "");
 							} else 
-								send_err(s);
+								send_err(s, id_buf);
 							break;
 
 
 						case PING:
-							send_ok(from->socket);
+							send_ok(from->socket, id_buf, "");
 							break;
 
 
 						case USERS:;
 							user *i;
 							int len, buflen;
-							char *tmp_buf, *p, *res;
+							char *tmp_buf, *p;
 
 							len = buflen = 0;
 
@@ -347,29 +370,28 @@ int main()
 								/* Account for a newline between names. */
 							}
 
-							tmp_buf = p = (char*) malloc(buflen + len + 1);
+							tmp_buf = p = (char*) malloc(buflen + len);
 
 							for (i = users; i != NULL; i = i->next) {
 								strcpy(p, i->name);
 								p += strlen(i->name);
 								*p++ = ' ';
 							}
-							*(p - 1) = '\n';
-							*p = '\0';
-							res = concatenate(2, "USERS ", tmp_buf);
+							*(p - 1) = '\0';
 							
-
-							// TODO new buffer, then split to more sends
-							send_to_user(from, from, res, strlen(res));
+							send_ok(from->socket, id_buf, tmp_buf);
 
 							free(tmp_buf);
-							free(res);
 							break;
 
 
 						case ALL_MSG:;
-							from_msg = concatenate(5, "ALL_MSG ", from->name, " -> ", stripped, "\n");
-							send_to_all(&users, from, from_msg, strlen(from_msg));
+							from_msg = concatenate(6, foreign_id, " ALL_MSG ", from->name, " ", stripped, "\n");
+							if (send_to_all(&users, from, from_msg, strlen(from_msg)))
+								send_ok(from->socket, id_buf, " ");
+							else
+								send_err(from->socket, id_buf);
+
 							free(from_msg);
 							break;
 
@@ -381,20 +403,27 @@ int main()
 
 							user *recipient = get_user(&users, c, NULL);
 							if (recipient == NULL) {
-								send_err(from->socket);
+								send_err(from->socket, id_buf);
 								break;
 							}
 							c = strtok(NULL, " ");
 
-							from_msg = concatenate(5, "PRIV_MSG ", from->name, " -> ", c, "\n");
-							send_to_user(from, recipient, from_msg, strlen(from_msg));
+							from_msg = concatenate(6, foreign_id, " PRIV_MSG ", from->name, " ", c, "\n");
+							to_msg = concatenate(3, recipient->name, " ", c);
+
+							if (send_to_user(from, recipient, from_msg, strlen(from_msg)))
+								send_ok(from->socket, id_buf, to_msg);
+							else
+								send_err(from->socket, id_buf);
+
 							free(from_msg);
+							free(to_msg);
 							break;
 
 
 						case NIL:
 							// shouldn't happen?
-							send_err(from->socket);
+							send_err(from->socket, id_buf);
 							break;
 
 
