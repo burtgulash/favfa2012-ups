@@ -80,7 +80,7 @@ static char *concatenate(int n, ...)
 		len += strlen(va_arg(argp, char *));
 	va_end(argp);
 
-	res = p = (char *) malloc(len + 2);
+	res = p = (char *) malloc(len + 1);
 
 	va_start(argp, n);
 	for (i = 0; i < n; i++) {
@@ -91,8 +91,7 @@ static char *concatenate(int n, ...)
 	}
 	va_end(argp);
 
-	*p = '\n';
-	*(p + 1) = '\0';
+	*p = '\0';
 
 	return res;
 }
@@ -338,20 +337,17 @@ int main()
 						case USERS:;
 							user *i;
 							int len, buflen;
-							char *tmp_buf, *p;
+							char *tmp_buf, *p, *res;
 
 							len = buflen = 0;
 
 							for (i = users; i != NULL; i = i->next) {
 								len ++;
 								buflen += strlen(i->name);
-
 								/* Account for a newline between names. */
-								if (len > 1)
-									buflen ++;
 							}
 
-							tmp_buf = p = (char*) malloc(buflen + 1);
+							tmp_buf = p = (char*) malloc(buflen + len + 1);
 
 							for (i = users; i != NULL; i = i->next) {
 								strcpy(p, i->name);
@@ -360,16 +356,19 @@ int main()
 							}
 							*(p - 1) = '\n';
 							*p = '\0';
+							res = concatenate(2, "USERS ", tmp_buf);
+							
 
 							// TODO new buffer, then split to more sends
-							send_to_user(from, from, tmp_buf, strlen(tmp_buf));
+							send_to_user(from, from, res, strlen(res));
 
 							free(tmp_buf);
+							free(res);
 							break;
 
 
 						case ALL_MSG:;
-							from_msg = concatenate(4, "ALL_MSG ", from->name, " -> ", stripped);
+							from_msg = concatenate(5, "ALL_MSG ", from->name, " -> ", stripped, "\n");
 							send_to_all(&users, from, from_msg, strlen(from_msg));
 							free(from_msg);
 							break;
@@ -387,7 +386,7 @@ int main()
 							}
 							c = strtok(NULL, " ");
 
-							from_msg = concatenate(4, "PRIV_MSG ", from->name, " -> ", c);
+							from_msg = concatenate(5, "PRIV_MSG ", from->name, " -> ", c, "\n");
 							send_to_user(from, recipient, from_msg, strlen(from_msg));
 							free(from_msg);
 							break;
