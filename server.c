@@ -58,24 +58,16 @@ static char *concatenate(int n, ...)
 	return res;
 }
 
-static void send_ok(int s, char *id_buf, char *response)
+static void send_ok(int s)
 {
-	char *tmp = concatenate(4, id_buf, " OK ", response, "\n");
-
-	if (send(s, tmp, strlen(tmp), 0) == -1)
+	if (send(s, "OK\n", 3, 0) == -1)
 		perror("OK not sent");
-
-	free(tmp);
 }
 
-static void send_err(int s, char *id_buf)
+static void send_err(int s)
 {
-	char *tmp = concatenate(3, id_buf, " ERR ", "\n");
-
-	if (send(s, tmp, strlen(tmp), 0) == -1)
+	if (send(s, "ERR\n", 4, 0) == -1)
 		perror("ERR not sent");
-
-	free(tmp);
 }
 
 static int send_to_user(user *from, user *to, const void *buf, size_t len)
@@ -111,7 +103,7 @@ void strip_nls(char *buf)
 		*p-- = '\0';
 }
 
-static char *parse_request(int s, char *buf, size_t len, char *id_buf, command_t *cmd_set, int *hangup)
+static char *parse_request(int s, char *buf, size_t len, command_t *cmd_set, int *hangup)
 {
 	int bs;
 
@@ -125,10 +117,6 @@ static char *parse_request(int s, char *buf, size_t len, char *id_buf, command_t
 	((char *)buf)[bs] = '\0';
 	strip_nls(buf);
 
-	strncpy(id_buf, buf, ID_SIZE);
-	id_buf[ID_SIZE] = '\0';
-
-	buf += ID_SIZE;
 	while (isspace(*buf))
 		buf++;
 	
@@ -181,8 +169,6 @@ int main()
 
 	user *users = NULL;
 	char buf[MAX_DATA_SIZE + 1];
-	char id_buf[ID_SIZE + 1];
-	char foreign_id[ID_SIZE + 1];
 
 	socklen_t addrlen;
 	struct addrinfo hints, *servinfo, *i;
@@ -197,9 +183,6 @@ int main()
 	command_t cmd_set;
 
 
-
-	memset(foreign_id, '_', sizeof foreign_id);
-	foreign_id[ID_SIZE] = '\0';
 
 	log = fopen("server.log", "a");
 	if (log == NULL)
@@ -272,7 +255,6 @@ int main()
 		for (s = 0; s <= maxfd; s++) {
 			if (FD_ISSET(s, &tmp_fds)) {
 				user *from = get_user(&users, NULL, &s);
-				memset(id_buf, 0, ID_SIZE + 1);
 
 				if (s == listener_fd) {
 					addrlen = sizeof their_addr;
@@ -287,13 +269,13 @@ int main()
 							maxfd = newfd;
 					}
 				} else if (from == NULL) {
-					char *stripped = parse_request(s, buf, sizeof buf - 1, id_buf, &cmd_set, &hangup);
+					char *stripped = parse_request(s, buf, sizeof buf - 1, &cmd_set, &hangup);
 					if (stripped == NULL) {
 						if (hangup) {
 							close(s);
 							FD_CLR(s, &master_fds);
 						} else
-							send_err(s, id_buf);
+							send_err(s);
 
 						break;
 					}
@@ -307,15 +289,15 @@ int main()
 							&& get_user(&users, user_name, NULL) == NULL) 
 						{
 							user_add(&users, user_name, s);
-							send_ok(s, id_buf, "");
+							send_ok(s);
 						} else {
 							free(user_name);
-							send_err(s, id_buf);
+							send_err(s);
 						}
 					} else
-						send_err(s, id_buf);
+						send_err(s);
 				} else {
-					char *stripped = parse_request(s, buf, sizeof buf - 1, id_buf, &cmd_set, &hangup);
+					char *stripped = parse_request(s, buf, sizeof buf - 1, &cmd_set, &hangup);
 
 					if (stripped == NULL) {
 						if (hangup) {
@@ -328,16 +310,16 @@ int main()
 								free(broken);
 							}
 						} else
-							send_err(from->socket, id_buf);
+							send_err(from->socket);
 
 						break;
 					}
 
-					char *from_msg, *to_msg;
+					char *from_msg;
 
 					switch(cmd_set) {
 						case LOGIN:
-							send_err(from->socket, id_buf);
+							send_err(from->socket);
 							break;
 
 
@@ -346,14 +328,14 @@ int main()
 							if (user_to_logout) {
 								free(user_to_logout->name);
 								free(user_to_logout);
-								send_ok(s, id_buf, "");
+								send_ok(s);
 							} else 
-								send_err(s, id_buf);
+								send_err(s);
 							break;
 
 
 						case PING:
-							send_ok(from->socket, id_buf, "");
+							send_ok(from->socket);
 							break;
 
 
@@ -379,18 +361,18 @@ int main()
 							}
 							*(p - 1) = '\0';
 							
-							send_ok(from->socket, id_buf, tmp_buf);
+							send_ok(from->socket);
 
 							free(tmp_buf);
 							break;
 
 
 						case ALL_MSG:;
-							from_msg = concatenate(6, foreign_id, " ALL_MSG ", from->name, " ", stripped, "\n");
+							from_msg = concatenate(5, "ALL_MSG ", from->name, " ", stripped, "\n");
 							if (send_to_all(&users, from, from_msg, strlen(from_msg)))
-								send_ok(from->socket, id_buf, " ");
+								send_ok(from->socket);
 							else
-								send_err(from->socket, id_buf);
+								send_err(from->socket);
 
 							free(from_msg);
 							break;
@@ -403,27 +385,25 @@ int main()
 
 							user *recipient = get_user(&users, c, NULL);
 							if (recipient == NULL) {
-								send_err(from->socket, id_buf);
+								send_err(from->socket);
 								break;
 							}
 							c = strtok(NULL, " ");
 
-							from_msg = concatenate(6, foreign_id, " PRIV_MSG ", from->name, " ", c, "\n");
-							to_msg = concatenate(3, recipient->name, " ", c);
+							from_msg = concatenate(5, "PRIV_MSG ", from->name, " ", c, "\n");
 
 							if (send_to_user(from, recipient, from_msg, strlen(from_msg)))
-								send_ok(from->socket, id_buf, to_msg);
+								send_ok(from->socket);
 							else
-								send_err(from->socket, id_buf);
+								send_err(from->socket);
 
 							free(from_msg);
-							free(to_msg);
 							break;
 
 
 						case NIL:
 							// shouldn't happen?
-							send_err(from->socket, id_buf);
+							send_err(from->socket);
 							break;
 
 
