@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <signal.h>
 #include <ctype.h>
 #include <errno.h>
 #include <assert.h>
@@ -182,7 +183,8 @@ int main()
 	int hangup;
 	command_t cmd_set;
 
-
+	// Sends crash on SIGPIPE when remote disconnects mid send.
+	signal(SIGPIPE, SIG_IGN);
 
 	log = fopen("server.log", "a");
 	if (log == NULL)
@@ -394,6 +396,7 @@ int main()
 								break;
 							}
 							c = strtok(NULL, " ");
+							c[strlen(c)] = ' ';
 
 							from_msg = concatenate(5, "PRIV_MSG ", from->name, " ", c, "\n");
 
