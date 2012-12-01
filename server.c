@@ -86,10 +86,11 @@ static int send_to_all(user **users, user *from, const void *buf, size_t len)
 	int all_good = 1;
 
 	for (i = *users; i != NULL; i = i->next)
-		if (send(i->socket, buf, len, 0) == -1) {
-			perror("message send");
-			all_good = 0;
-		}
+		if (from->socket != i->socket)
+			if (send(i->socket, buf, len, 0) == -1) {
+				perror("message send");
+				all_good = 0;
+			}
 
 	return all_good;
 }
@@ -164,9 +165,9 @@ static int sendall(int s, const void *buf, size_t len, int flags)
 	return n;
 }
 
-int main()
+int main(int argc, char **argv)
 {
-	char *port = DEFAULT_PORT;
+	char *port;
 
 	user *users = NULL;
 	char buf[MAX_DATA_SIZE + 1];
@@ -183,8 +184,16 @@ int main()
 	int hangup;
 	command_t cmd_set;
 
-	// Sends crash on SIGPIPE when remote disconnects mid send.
+	// Fixes this: sends crash on SIGPIPE when remote disconnects mid send.
 	signal(SIGPIPE, SIG_IGN);
+
+	if (argc == 2)
+		port = argv[1];
+	else if (argc == 1)
+		port = DEFAULT_PORT;
+	else 
+		fprintf(stderr, "too many arguments.\n");
+
 
 	log = fopen("server.log", "a");
 	if (log == NULL)
@@ -283,8 +292,9 @@ int main()
 					}
 
 					if (cmd_set == LOGIN) {
-						char *user_name = (char *) malloc(sizeof(char) * (strlen(stripped) + 1));
-						strcpy(user_name, stripped);
+						char *c = strtok(stripped, " ");
+						char *user_name = (char *) malloc(sizeof(char) * (strlen(c) + 1));
+						strcpy(user_name, c);
 
 						if (user_name 
 							&& strlen(user_name) > 0
@@ -387,15 +397,22 @@ int main()
 
 						case PRIV_MSG:;
 							char *c = strtok(stripped, " ");						
-							if (c == NULL)
+							if (c == NULL) {
+								send_err(from->socket);
 								break;
+							}
 
 							user *recipient = get_user(&users, c, NULL);
 							if (recipient == NULL) {
 								send_err(from->socket);
 								break;
 							}
+
 							c = strtok(NULL, " ");
+							if (c == NULL) {
+								send_err(from->socket);
+								break;
+							}
 							c[strlen(c)] = ' ';
 
 							from_msg = concatenate(5, "PRIV_MSG ", from->name, " ", c, "\n");
