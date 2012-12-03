@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <assert.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -20,10 +21,42 @@
 #define MAX_DATA_SIZE 1024
 #define ID_SIZE 3
 
+#define LOG_FILE "server.log"
+
+
 typedef enum {NIL, LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
 
-static FILE *log;
+static int log_exists = 0;
 
+void server_log(const char *what, ...)
+{
+	time_t rawtime;
+	struct tm *timeinfo;
+	char *asc;
+	FILE *file;
+	va_list args;
+
+	if (!log_exists) {
+		file = fopen(LOG_FILE, "w");
+		log_exists = 1;
+	} else
+		file = fopen(LOG_FILE, "a");
+
+	if (file == NULL) {
+		log_exists = 0;
+	} else {
+		time(&rawtime);
+		timeinfo = localtime(&rawtime);
+		asc = asctime(timeinfo);
+		asc[strlen(asc) - 1] = '\0';
+	
+		fprintf(file, "[%s] ", asc);
+		va_start(args, what);
+		vfprintf(file, what, args);
+		va_end(args);
+		fclose(file);
+	}
+}
 
 /*
  * Concatenates name and message together. Result must be freed after using.
@@ -184,6 +217,7 @@ int main(int argc, char **argv)
 	int hangup;
 	command_t cmd_set;
 
+
 	// Fixes this: sends crash on SIGPIPE when remote disconnects mid send.
 	signal(SIGPIPE, SIG_IGN);
 
@@ -195,13 +229,6 @@ int main(int argc, char **argv)
 		fprintf(stderr, "too many arguments.\n");
 
 
-	log = fopen("server.log", "a");
-	if (log == NULL)
-		log = stdout;
-
-	// TODO remove 
-	log = stdout;
-
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
@@ -210,7 +237,7 @@ int main(int argc, char **argv)
 
 	int status;
 	if ((status = getaddrinfo(NULL, port, &hints, &servinfo)) != 0) {
-		fprintf(log, "getaddrinfo: %s\n", gai_strerror(status));	
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));	
 		exit(1);
 	}
 
@@ -243,7 +270,7 @@ int main(int argc, char **argv)
 	freeaddrinfo(servinfo);
 
 	if (i == NULL) {
-		fprintf(log, "server: failed to bind\n");
+		fprintf(stderr, "server: failed to bind\n");
 		exit(2);
 	}
 
@@ -302,6 +329,7 @@ int main(int argc, char **argv)
 						{
 							user_add(&users, user_name, s);
 							send_ok(s);
+							server_log("%s logged in.\n", user_name);
 						} else {
 							free(user_name);
 							send_err(s);
@@ -341,6 +369,7 @@ int main(int argc, char **argv)
 								free(user_to_logout->name);
 								free(user_to_logout);
 								send_ok(s);
+								server_log("%s logged out.\n", user_to_logout->name);
 							} else 
 								send_err(s);
 							break;
@@ -386,9 +415,10 @@ int main(int argc, char **argv)
 
 						case ALL_MSG:;
 							from_msg = concatenate(5, "ALL_MSG ", from->name, " ", stripped, "\n");
-							if (send_to_all(&users, from, from_msg, strlen(from_msg)))
+							if (send_to_all(&users, from, from_msg, strlen(from_msg))) {
 								send_ok(from->socket);
-							else
+								server_log("%s: %s\n", from->name, stripped);
+							} else
 								send_err(from->socket);
 
 							free(from_msg);
@@ -417,9 +447,10 @@ int main(int argc, char **argv)
 
 							from_msg = concatenate(5, "PRIV_MSG ", from->name, " ", c, "\n");
 
-							if (send_to_user(from, recipient, from_msg, strlen(from_msg)))
+							if (send_to_user(from, recipient, from_msg, strlen(from_msg))) {
 								send_ok(from->socket);
-							else
+								server_log("%s -> %s: %s\n", from->name, recipient->name, c);
+							} else
 								send_err(from->socket);
 
 							free(from_msg);
@@ -440,6 +471,6 @@ int main(int argc, char **argv)
 			}
 		}
 	}
-	
+
 	return EXIT_SUCCESS;
 }
