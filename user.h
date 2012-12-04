@@ -1,5 +1,7 @@
 #ifndef USER_H
 #define USER_H
+// #include <netinet/in.h>
+#include <arpa/inet.h>
 
 struct _user {
 	char *name;

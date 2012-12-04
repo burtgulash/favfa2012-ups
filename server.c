@@ -28,13 +28,30 @@ typedef enum {NIL, LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
 
 static int log_exists = 0;
 
-void server_log(const char *what, ...)
+void server_log(int s, const char *what, ...)
 {
 	time_t rawtime;
 	struct tm *timeinfo;
 	char *asc;
+	char ip[INET6_ADDRSTRLEN];
+	socklen_t len;
+	struct sockaddr_storage addr;
 	FILE *file;
 	va_list args;
+
+	memset(ip, ' ', sizeof ip);
+	ip[sizeof ip - 1] = '\0';
+
+	len = sizeof addr;
+	if (getpeername(s, (struct sockaddr *) &addr, &len) != -1) {
+		if (addr.ss_family == AF_INET) {
+			struct sockaddr_in *ipv4 = (struct sockaddr_in *) &addr;
+			inet_ntop(AF_INET, &ipv4->sin_addr, ip, sizeof ip);
+		} else {
+			struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *) &addr;
+			inet_ntop(AF_INET6, &ipv6->sin6_addr, ip, sizeof ip);
+		}
+	}
 
 	if (!log_exists) {
 		file = fopen(LOG_FILE, "w");
@@ -49,8 +66,11 @@ void server_log(const char *what, ...)
 		timeinfo = localtime(&rawtime);
 		asc = asctime(timeinfo);
 		asc[strlen(asc) - 1] = '\0';
-	
+
+		fprintf(file, "%s -- ", ip);
+
 		fprintf(file, "[%s] ", asc);
+
 		va_start(args, what);
 		vfprintf(file, what, args);
 		va_end(args);
@@ -329,7 +349,7 @@ int main(int argc, char **argv)
 						{
 							user_add(&users, user_name, s);
 							send_ok(s);
-							server_log("%s logged in.\n", user_name);
+							server_log(s, "%s logged in.\n", user_name);
 						} else {
 							free(user_name);
 							send_err(s);
@@ -366,10 +386,10 @@ int main(int argc, char **argv)
 						case LOGOUT:;
 							user *user_to_logout = user_rm(&users, from->name, &from->socket);
 							if (user_to_logout) {
+								send_ok(s);
+								server_log(s, "%s logged out.\n", user_to_logout->name);
 								free(user_to_logout->name);
 								free(user_to_logout);
-								send_ok(s);
-								server_log("%s logged out.\n", user_to_logout->name);
 							} else 
 								send_err(s);
 							break;
@@ -417,7 +437,7 @@ int main(int argc, char **argv)
 							from_msg = concatenate(5, "ALL_MSG ", from->name, " ", stripped, "\n");
 							if (send_to_all(&users, from, from_msg, strlen(from_msg))) {
 								send_ok(from->socket);
-								server_log("%s: %s\n", from->name, stripped);
+								server_log(from->socket, "%s: %s\n", from->name, stripped);
 							} else
 								send_err(from->socket);
 
@@ -449,7 +469,7 @@ int main(int argc, char **argv)
 
 							if (send_to_user(from, recipient, from_msg, strlen(from_msg))) {
 								send_ok(from->socket);
-								server_log("%s -> %s: %s\n", from->name, recipient->name, c);
+								server_log(from->socket, "%s -> %s: %s\n", from->name, recipient->name, c);
 							} else
 								send_err(from->socket);
 

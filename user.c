@@ -13,6 +13,7 @@ int user_add(user **u, const char *name, int socket)
 	new->next = *u;
 	*u = new;
 
+
 	return 1;
 }
 
