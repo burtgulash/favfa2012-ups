@@ -13,6 +13,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 
 #include "user.h"
 
@@ -27,6 +28,33 @@
 typedef enum {NIL, LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
 
 static int log_exists = 0;
+static int terminated = 0;
+static pthread_mutex_t terminate_lock;
+
+
+void *interactive_loop(void *ptr)
+{
+	char input[50];
+
+	while(1) {
+		printf("[t]erm to terminate server.\n");
+		printf("[d]ata for info on transferred data.\n");
+		printf("\n");
+
+		
+		printf(">> ");
+		scanf("%s", input);
+		if (input && (input[0] == 't' || strcmp(input, "term") == 0)) {
+			pthread_mutex_lock(&terminate_lock);
+			terminated = 1;
+			pthread_mutex_unlock(&terminate_lock);
+
+			break;
+		} else if (input && (input[0] == 'd' || strcmp(input, "data") == 0)) {
+			printf("transferred.... TODO\n");
+		}
+	}
+}
 
 void server_log(int s, const char *what, ...)
 {
@@ -115,19 +143,21 @@ static char *concatenate(int n, ...)
 static void send_ok(int s)
 {
 	if (send(s, "OK\n", 3, 0) == -1)
-		perror("OK not sent");
+		;
+		// perror("OK not sent");
 }
 
 static void send_err(int s)
 {
 	if (send(s, "ERR\n", 4, 0) == -1)
-		perror("ERR not sent");
+		;
+		// perror("ERR not sent");
 }
 
 static int send_to_user(user *from, user *to, const void *buf, size_t len)
 {
 	if (send(to->socket, buf, len, 0) == -1) {
-		perror("message send");
+		// perror("message send");
 		return 0;
 	} else 
 		return 1;
@@ -139,9 +169,9 @@ static int send_to_all(user **users, user *from, const void *buf, size_t len)
 	int all_good = 1;
 
 	for (i = *users; i != NULL; i = i->next)
-		if (from->socket != i->socket)
+		if (from == NULL || from->socket != i->socket)
 			if (send(i->socket, buf, len, 0) == -1) {
-				perror("message send");
+				// perror("message send");
 				all_good = 0;
 			}
 
@@ -218,6 +248,36 @@ static int sendall(int s, const void *buf, size_t len, int flags)
 	return n;
 }
 
+char *getUsersList(user **users)
+{
+	user *i;
+	int len, buflen;
+	char *tmp_buf, *p, *res;
+
+	len = buflen = 0;
+
+	for (i = *users; i != NULL; i = i->next) {
+		len ++;
+		buflen += strlen(i->name);
+		/* Account for a newline between names. */
+	}
+
+	tmp_buf = p = (char*) malloc(buflen + len);
+
+	for (i = *users; i != NULL; i = i->next) {
+		strcpy(p, i->name);
+		p += strlen(i->name);
+		*p++ = ' ';
+	}
+	*(p - 1) = '\0';
+	
+	res = concatenate(3, "USERS ", tmp_buf, "\n");
+
+	free(tmp_buf);
+
+	return res;
+}
+
 int main(int argc, char **argv)
 {
 	char *port;
@@ -236,7 +296,18 @@ int main(int argc, char **argv)
 	int listener_fd, newfd;
 	int hangup;
 	command_t cmd_set;
+		
+	pthread_t interactive;
 
+	
+
+	pthread_mutex_init(&terminate_lock, NULL);
+	if (pthread_create(&interactive, NULL, interactive_loop, NULL) == -1) {
+		fprintf(stderr, "Couldn't initiate interactive mode\n");
+		exit(1);
+	}
+	
+		
 
 	// Fixes this: sends crash on SIGPIPE when remote disconnects mid send.
 	signal(SIGPIPE, SIG_IGN);
@@ -265,7 +336,7 @@ int main(int argc, char **argv)
 		if ((listener_fd = socket(i->ai_family, 
 							i->ai_socktype, 
 							IPPROTO_TCP)) == -1) {
-			perror("server: socket");
+			perror("socket");
 			continue;
 		}
 
@@ -274,13 +345,13 @@ int main(int argc, char **argv)
 		int yes = 1;
 		if (setsockopt(listener_fd, SOL_SOCKET, SO_REUSEADDR, 
 						&yes, sizeof(int)) == -1) {
-			perror("server: setsockopt");
+			perror("setsockopt");
 			exit(1);
 		}
 
 		if (bind(listener_fd, i->ai_addr, i->ai_addrlen) == -1) {
 			close(listener_fd);
-			perror("server: bind");
+			perror("bind");
 			continue;
 		}
 
@@ -290,12 +361,12 @@ int main(int argc, char **argv)
 	freeaddrinfo(servinfo);
 
 	if (i == NULL) {
-		fprintf(stderr, "server: failed to bind\n");
+		fprintf(stderr, "failed to bind\n");
 		exit(2);
 	}
 
 	if (listen(listener_fd, BACKLOG) == -1) {
-		perror("server: listen");
+		perror("listen");
 		exit(2);
 	}
 
@@ -303,10 +374,18 @@ int main(int argc, char **argv)
 	FD_ZERO(&master_fds);
 	FD_SET(listener_fd, &master_fds);
 
+	
 	while (1) {
+		pthread_mutex_lock(&terminate_lock);
+		if (terminated)
+			break;
+		pthread_mutex_unlock(&terminate_lock);
+
+		// timeout for select set to 2 seconds
+		struct timeval tv = {0, 1000};
 		tmp_fds = master_fds;
-		if (select(maxfd + 1, &tmp_fds, NULL, NULL, NULL) == -1) {
-			perror("server: select");
+		if (select(maxfd + 1, &tmp_fds, NULL, NULL, &tv) == -1) {
+			perror("select");
 			exit(3);
 		}
 
@@ -350,6 +429,11 @@ int main(int argc, char **argv)
 							user_add(&users, user_name, s);
 							send_ok(s);
 							server_log(s, "%s logged in.\n", user_name);
+
+							char *res = getUsersList(&users);
+							send_to_all(&users, NULL, res, strlen(res));
+							free(res);
+
 						} else {
 							free(user_name);
 							send_err(s);
@@ -388,6 +472,10 @@ int main(int argc, char **argv)
 							if (user_to_logout) {
 								send_ok(s);
 								server_log(s, "%s logged out.\n", user_to_logout->name);
+								char *res = getUsersList(&users);
+								send_to_all(&users, NULL, res, strlen(res));
+								free(res);
+
 								free(user_to_logout->name);
 								free(user_to_logout);
 							} else 
@@ -401,46 +489,15 @@ int main(int argc, char **argv)
 
 
 						case USERS:;
-							user *i;
-							int len, buflen;
-							char *tmp_buf, *p, *res;
-
-							len = buflen = 0;
-
-							for (i = users; i != NULL; i = i->next) {
-								len ++;
-								buflen += strlen(i->name);
-								/* Account for a newline between names. */
-							}
-
-							tmp_buf = p = (char*) malloc(buflen + len);
-
-							for (i = users; i != NULL; i = i->next) {
-								strcpy(p, i->name);
-								p += strlen(i->name);
-								*p++ = ' ';
-							}
-							*(p - 1) = '\0';
-							
-							res = concatenate(3, "USERS ", tmp_buf, "\n");
-							if(send_to_user(from, from, res, strlen(res)))
-								send_ok(from->socket);
-							else
-								send_err(from->socket);
-
-							free(tmp_buf);
+							char *res = getUsersList(&users);
+							send_to_user(from, from, res, strlen(res));
 							free(res);
 							break;
 
 
 						case ALL_MSG:;
 							from_msg = concatenate(5, "ALL_MSG ", from->name, " ", stripped, "\n");
-							if (send_to_all(&users, from, from_msg, strlen(from_msg))) {
-								send_ok(from->socket);
-								server_log(from->socket, "%s: %s\n", from->name, stripped);
-							} else
-								send_err(from->socket);
-
+							send_to_all(&users, from, from_msg, strlen(from_msg)); 
 							free(from_msg);
 							break;
 
@@ -467,11 +524,7 @@ int main(int argc, char **argv)
 
 							from_msg = concatenate(5, "PRIV_MSG ", from->name, " ", c, "\n");
 
-							if (send_to_user(from, recipient, from_msg, strlen(from_msg))) {
-								send_ok(from->socket);
-								server_log(from->socket, "%s -> %s: %s\n", from->name, recipient->name, c);
-							} else
-								send_err(from->socket);
+							send_to_user(from, recipient, from_msg, strlen(from_msg));
 
 							free(from_msg);
 							break;
