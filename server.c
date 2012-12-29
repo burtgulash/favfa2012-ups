@@ -19,8 +19,7 @@
 
 #define DEFAULT_PORT "1234"
 #define BACKLOG 10
-#define MAX_DATA_SIZE 1024
-#define ID_SIZE 3
+#define MAX_DATA_SIZE 2048
 
 #define LOG_FILE "server.log"
 
@@ -30,15 +29,22 @@ typedef enum {NIL, LOGIN, LOGOUT, ALL_MSG, PRIV_MSG, USERS, PING} command_t;
 static int log_exists = 0;
 static int terminated = 0;
 static pthread_mutex_t terminate_lock;
+pthread_mutex_t users_lock;
 
+static int bytes_sent = 0;
+static int bytes_received = 0;
 
-void *interactive_loop(void *ptr)
+// List of users.
+static user *users = NULL;
+
+static void *interactive_loop(void *ptr)
 {
 	char input[50];
 
 	while(1) {
 		printf("[t]erm to terminate server.\n");
 		printf("[d]ata for info on transferred data.\n");
+		printf("[u]sers for list of users.\n");
 		printf("\n");
 
 		
@@ -51,12 +57,24 @@ void *interactive_loop(void *ptr)
 
 			break;
 		} else if (input && (input[0] == 'd' || strcmp(input, "data") == 0)) {
-			printf("transferred.... TODO\n");
+			printf("%7d bytes sent.\n", bytes_sent);
+			printf("%7d bytes received.\n", bytes_received);
+			printf("\n");
+		} else if (input && (input[0] == 'u' || strcmp(input, "users") == 0)) {
+			user *i;
+
+			printf("Users:\n");
+			pthread_mutex_lock(&users_lock);
+			for (i = users; i != NULL; i = i->next)
+				printf("%s\n", i->name);
+			pthread_mutex_unlock(&users_lock);
+
+			printf("\n");
 		}
 	}
 }
 
-void server_log(int s, const char *what, ...)
+static void server_log(int s, const char *what, ...)
 {
 	time_t rawtime;
 	struct tm *timeinfo;
@@ -106,6 +124,16 @@ void server_log(int s, const char *what, ...)
 	}
 }
 
+
+
+static void strip_nls(char *buf)
+{
+	char *p = buf + strlen(buf) - 1;
+
+	while (p && (*p == '\r' || *p == '\n'))
+		*p-- = '\0';
+}
+
 /*
  * Concatenates name and message together. Result must be freed after using.
  */
@@ -140,52 +168,58 @@ static char *concatenate(int n, ...)
 	return res;
 }
 
+static int logged_send(int s, const void *buf, size_t len)
+{
+	bytes_sent += len;
+	return send(s, buf, len, 0);
+}
+
+static int logged_recv(int s, void *buf, size_t len)
+{
+	int received_now;
+
+	received_now = recv(s, buf, len, 0);
+	if (received_now > 0) {
+		bytes_received += received_now;
+
+		// Strip newlines and log.
+		char *tmp_log = (char *) malloc(sizeof(char) * (received_now + 1));
+		strncpy(tmp_log, buf, received_now);
+		tmp_log[received_now] = '\0';
+		strip_nls(tmp_log);
+
+		if (strlen(tmp_log) > 0)
+			server_log(s, "%s\n", tmp_log);
+
+		free(tmp_log);
+	}
+
+	return received_now;
+}
+
 static void send_ok(int s)
 {
-	if (send(s, "OK\n", 3, 0) == -1)
-		;
-		// perror("OK not sent");
+	logged_send(s, "OK\n", 3);
 }
 
 static void send_err(int s)
 {
-	if (send(s, "ERR\n", 4, 0) == -1)
-		;
-		// perror("ERR not sent");
+	logged_send(s, "ERR\n", 4);
 }
 
-static int send_to_user(user *from, user *to, const void *buf, size_t len)
+static void send_to_user(user *from, user *to, const void *buf, size_t len)
 {
-	if (send(to->socket, buf, len, 0) == -1) {
-		// perror("message send");
-		return 0;
-	} else 
-		return 1;
+	logged_send(to->socket, buf, len);
 }
 
-static int send_to_all(user **users, user *from, const void *buf, size_t len) 
+static void send_to_all(user **users, user *from, const void *buf, size_t len) 
 {
 	user *i;
 	int all_good = 1;
 
 	for (i = *users; i != NULL; i = i->next)
 		if (from == NULL || from->socket != i->socket)
-			if (send(i->socket, buf, len, 0) == -1) {
-				// perror("message send");
-				all_good = 0;
-			}
-
-	return all_good;
-}
-
-
-
-void strip_nls(char *buf)
-{
-	char *p = buf + strlen(buf) - 1;
-
-	while (p && (*p == '\r' || *p == '\n'))
-		*p-- = '\0';
+			logged_send(i->socket, buf, len);
 }
 
 static char *parse_request(int s, char *buf, size_t len, command_t *cmd_set, int *hangup)
@@ -193,7 +227,7 @@ static char *parse_request(int s, char *buf, size_t len, command_t *cmd_set, int
 	int bs;
 
 	*hangup = 0;
-	if ((bs = recv(s, buf, len, 0)) <= 0) {
+	if ((bs = logged_recv(s, buf, len)) <= 0) {
 		if (bs == 0)
 			*hangup = 1;
 		return NULL;
@@ -238,7 +272,7 @@ static int sendall(int s, const void *buf, size_t len, int flags)
 	size_t sent, left, n;
 	
 	while (sent < len) {
-		n = send(s, buf + sent, left, 0);
+		n = logged_send(s, buf + sent, left);
 		if (n == -1)
 			break;
 		sent += n;
@@ -248,7 +282,7 @@ static int sendall(int s, const void *buf, size_t len, int flags)
 	return n;
 }
 
-char *getUsersList(user **users)
+static char *get_users_list(user **users)
 {
 	user *i;
 	int len, buflen;
@@ -256,6 +290,7 @@ char *getUsersList(user **users)
 
 	len = buflen = 0;
 
+	pthread_mutex_lock(&users_lock);
 	for (i = *users; i != NULL; i = i->next) {
 		len ++;
 		buflen += strlen(i->name);
@@ -270,6 +305,7 @@ char *getUsersList(user **users)
 		*p++ = ' ';
 	}
 	*(p - 1) = '\0';
+	pthread_mutex_unlock(&users_lock);
 	
 	res = concatenate(3, "USERS ", tmp_buf, "\n");
 
@@ -282,7 +318,6 @@ int main(int argc, char **argv)
 {
 	char *port;
 
-	user *users = NULL;
 	char buf[MAX_DATA_SIZE + 1];
 
 	socklen_t addrlen;
@@ -296,18 +331,21 @@ int main(int argc, char **argv)
 	int listener_fd, newfd;
 	int hangup;
 	command_t cmd_set;
-		
+
+	// Thread for interactive querying of this server.
 	pthread_t interactive;
 
-	
 
+	// Init mutexes.
 	pthread_mutex_init(&terminate_lock, NULL);
+	pthread_mutex_init(&users_lock, NULL);
+
 	if (pthread_create(&interactive, NULL, interactive_loop, NULL) == -1) {
 		fprintf(stderr, "Couldn't initiate interactive mode\n");
 		exit(1);
 	}
-	
-		
+
+
 
 	// Fixes this: sends crash on SIGPIPE when remote disconnects mid send.
 	signal(SIGPIPE, SIG_IGN);
@@ -334,8 +372,8 @@ int main(int argc, char **argv)
 
 	for (i = servinfo; i != NULL; i = i->ai_next) {
 		if ((listener_fd = socket(i->ai_family, 
-							i->ai_socktype, 
-							IPPROTO_TCP)) == -1) {
+						i->ai_socktype, 
+						IPPROTO_TCP)) == -1) {
 			perror("socket");
 			continue;
 		}
@@ -344,7 +382,7 @@ int main(int argc, char **argv)
 
 		int yes = 1;
 		if (setsockopt(listener_fd, SOL_SOCKET, SO_REUSEADDR, 
-						&yes, sizeof(int)) == -1) {
+					&yes, sizeof(int)) == -1) {
 			perror("setsockopt");
 			exit(1);
 		}
@@ -374,7 +412,7 @@ int main(int argc, char **argv)
 	FD_ZERO(&master_fds);
 	FD_SET(listener_fd, &master_fds);
 
-	
+
 	while (1) {
 		pthread_mutex_lock(&terminate_lock);
 		if (terminated)
@@ -396,8 +434,8 @@ int main(int argc, char **argv)
 				if (s == listener_fd) {
 					addrlen = sizeof their_addr;
 					newfd = accept(listener_fd, 
-									(struct sockaddr*) &their_addr, &addrlen);
-					
+							(struct sockaddr*) &their_addr, &addrlen);
+
 					if (newfd == -1)
 						perror("accept");
 					else {
@@ -430,7 +468,7 @@ int main(int argc, char **argv)
 							send_ok(s);
 							server_log(s, "%s logged in.\n", user_name);
 
-							char *res = getUsersList(&users);
+							char *res = get_users_list(&users);
 							send_to_all(&users, NULL, res, strlen(res));
 							free(res);
 
@@ -472,7 +510,7 @@ int main(int argc, char **argv)
 							if (user_to_logout) {
 								send_ok(s);
 								server_log(s, "%s logged out.\n", user_to_logout->name);
-								char *res = getUsersList(&users);
+								char *res = get_users_list(&users);
 								send_to_all(&users, NULL, res, strlen(res));
 								free(res);
 
@@ -489,8 +527,8 @@ int main(int argc, char **argv)
 
 
 						case USERS:;
-							char *res = getUsersList(&users);
-							send_to_user(from, from, res, strlen(res));
+							char *res = get_users_list(&users);
+							send_to_user(NULL, from, res, strlen(res));
 							free(res);
 							break;
 
@@ -520,7 +558,7 @@ int main(int argc, char **argv)
 								send_err(from->socket);
 								break;
 							}
-							c[strlen(c)] = ' ';
+							c[strlen(c)] = '\0';
 
 							from_msg = concatenate(5, "PRIV_MSG ", from->name, " ", c, "\n");
 

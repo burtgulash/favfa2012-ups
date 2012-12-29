@@ -3,6 +3,8 @@
 
 #include "user.h"
 
+extern pthread_mutex_t users_lock;
+
 int user_add(user **u, const char *name, int socket)
 {
 	user *new = (user*) malloc(sizeof(user));
@@ -10,8 +12,10 @@ int user_add(user **u, const char *name, int socket)
 	strcpy(new->name, name);
 	new->socket = socket;
 
+	pthread_mutex_lock(&users_lock);
 	new->next = *u;
 	*u = new;
+	pthread_mutex_unlock(&users_lock);
 
 
 	return 1;
@@ -21,43 +25,19 @@ user *get_user(user **u, const char *name, int *s)
 {
 	user *i;
 
+	pthread_mutex_lock(&users_lock);
 	for (i = *u; i != NULL; i = i->next)
 		if ((s || name) 
 				&& (!s    || *s == i->socket) 
-				&& (!name || strcmp(i->name, name) == 0)) 
+				&& (!name || strcmp(i->name, name) == 0)) {
+			pthread_mutex_unlock(&users_lock);
 			return i;
+		}
+	pthread_mutex_unlock(&users_lock);
 	
 	return NULL;
 }
 
-char *get_all_users(user **u)
-{
-	user *i;
-	int len, buflen;
-	char *buf, *tmp;
-
-	len = buflen = 0;
-
-	for (i = *u; i != NULL; i = i->next) {
-		len ++;
-		buflen += strlen(i->name);
-
-		/* Account for a space between names. */
-		if (len > 1)
-			buflen ++;
-	}
-
-	buf = tmp = (char*) malloc(buflen + 1);
-
-	for (i = *u; i != NULL; i = i->next) {
-		strcpy(tmp, i->name);
-		tmp += strlen(i->name);
-		*tmp++ = ' ';
-	}
-	*tmp = '\0';
-
-	return buf;
-}
 
 user *user_rm(user **u, const char *name, int *s)
 {
@@ -65,6 +45,7 @@ user *user_rm(user **u, const char *name, int *s)
 
 	prev = NULL;
 
+	pthread_mutex_lock(&users_lock);
 	for (i = *u; i != NULL; i = i->next) {
 		if ((s || name) 
 				&& (!s    || *s == i->socket) 
@@ -77,11 +58,13 @@ user *user_rm(user **u, const char *name, int *s)
 
 			i->next = NULL;
 	
+			pthread_mutex_unlock(&users_lock);
 			return i;
 		}
 		
 		prev = i;
 	}
+	pthread_mutex_unlock(&users_lock);
 	
 	return NULL;
 }
@@ -90,6 +73,7 @@ int user_rm_all(user **u)
 {
 	user *i, *next;
 
+	pthread_mutex_lock(&users_lock);
 	for (i = *u; i != NULL; i = next) {
 		next = i->next;
 		free(i->name);
@@ -97,6 +81,7 @@ int user_rm_all(user **u)
 	}
 
 	*u = NULL;
+	pthread_mutex_unlock(&users_lock);
 
 	return 1;
 }
