@@ -1,6 +1,7 @@
 \documentclass[12pt,titlepage]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[czech]{babel}
+\usepackage[pdfborder=0 0 0]{hyperref}
 
 
 \begin{document}
@@ -85,10 +86,9 @@ Václav
 Jiřina
 \end{verbatim}
 
-\section{Implementace} % TODO fakt?
+\section{Implementace}
 \subsection{Server}
-Server je C program využívající knihovnu Berkeley socketů a vláknovou knihovnu
-pthread. 
+Server je C program využívající knihovnu socketů a vláknovou knihovnu pthread. 
 
 Při inicializaci je vytvořen socket, který je připojen na výchozí nebo předem
 zvolený port. Celý program je jeden nekonečný cyklus, který je obsluhován
@@ -131,9 +131,7 @@ módu.
 
 \section{Použité nástroje a prostředí}
 Obě aplikace klienta i serveru byly vyvíjeny pod systémem GNU/Linux. Klient byl
-vyvinut za pomoci IDE Eclipse, pro které byla prvotně vyvinuta GUI knihovna
-SWT. Server a makefile byly napsány ve Vimu.
-% TODO swt fakt?
+vyvinut za pomoci IDE Eclipse. Server a makefile byly napsány ve Vimu.
 
 
 \section{Uživatelká příručka}
@@ -171,10 +169,22 @@ vyměněných datech nebo získat seznam právě přihlášených uživatelů.
 Klient je program s grafickým uživatelským rozhraním v jazyce Java a využívá
 GUI knihovnu SWT.
 \subsubsection{Přeložení}
+\paragraph{Linux}
+\begin{verbatim}
+$ jar xf swt_linux.jar
+$ javac *.java
+\end{verbatim}
+
+\paragraph{Windows}
+\begin{verbatim}
+$ jar xf swt_win.jar
+$ javac *.java
+\end{verbatim}
+
 \subsubsection{Spuštění}
 Protože se jedná o Java aplikaci, spuštění provedeme z konzole 
 \begin{verbatim}
-$ java -jar client.jar
+$ java Main
 \end{verbatim}
 
 \subsubsection{Ovládání}
@@ -183,4 +193,14 @@ kde vybere položku $Connect to$. Po zadání parametrů serveru (adresa, port a
 uživatelské jméno) a potvrzení je při zadání korektních údajích a ještě
 nepoužitého uživatelského jména úspěšně připojen a rovnou přihlášen, nemusí se
 starat o záležitosti jako $LOGIN$ a $LOGOUT$.
+
+\clearpage
+
+\begin{thebibliography}{1}
+\bibitem[1]{beej}
+{\em Beej} \\
+{\bf Beej's Guide to Network Programming Using Internet Sockets} \\
+\url{http://beej.us/guide/bgnet/}
+
+\end{thebibliography}
 \end{document}
