@@ -62,13 +62,13 @@ static void *interactive_loop(void *ptr)
 		
 		printf(">> ");
 		scanf("%s", input);
-		if (input && (input[0] == 't' || strcmp(input, "term") == 0)) {
+		if (*input && (input[0] == 't' || strcmp(input, "term") == 0)) {
 			pthread_mutex_lock(&terminate_lock);
 			terminated = 1;
 			pthread_mutex_unlock(&terminate_lock);
 
 			break;
-		} else if (input && (input[0] == 'd' || strcmp(input, "data") == 0)) {
+		} else if (*input && (input[0] == 'd' || strcmp(input, "data") == 0)) {
 			end_time = time(NULL);
 			t = (unsigned long) difftime(end_time, start_time);
 
@@ -86,7 +86,7 @@ static void *interactive_loop(void *ptr)
 			printf("\n");
 			printf("%7d request errors.\n", error_count);
 			printf("\n");
-		} else if (input && (input[0] == 'u' || strcmp(input, "users") == 0)) {
+		} else if (*input && (input[0] == 'u' || strcmp(input, "users") == 0)) {
 			user *i;
 
 			printf("Users:\n");
@@ -98,6 +98,8 @@ static void *interactive_loop(void *ptr)
 			printf("\n");
 		}
 	}
+
+	return EXIT_SUCCESS;
 }
 
 static void server_log(int s, const char *what, ...)
@@ -166,7 +168,7 @@ static void strip_nls(char *buf)
 static char *concatenate(int n, ...)
 {
 	char *res, *p, *arg;
-	int i, j;
+	int i;
 	size_t len = 0;
 	va_list argp;
 	
@@ -244,7 +246,6 @@ static void send_to_user(user *from, user *to, const void *buf, size_t len)
 static void send_to_all(user **users, user *from, const void *buf, size_t len) 
 {
 	user *i;
-	int all_good = 1;
 
 	for (i = *users; i != NULL; i = i->next)
 		if (from == NULL || from->socket != i->socket)
@@ -296,6 +297,7 @@ static char *parse_request(int s, char *buf, size_t len, command_t *cmd_set, int
 	return NULL;
 }
 
+/*
 static int sendall(int s, const void *buf, size_t len, int flags) 
 {
 	size_t sent, left, n;
@@ -310,6 +312,7 @@ static int sendall(int s, const void *buf, size_t len, int flags)
 
 	return n;
 }
+*/
 
 static char *get_users_list(user **users)
 {
