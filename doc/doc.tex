@@ -1,0 +1,186 @@
+\documentclass[12pt,titlepage]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[czech]{babel}
+
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+	\mbox{} \\[3cm]
+	\Huge{Semestrální práce z předmětu KIV/UPS} \\[.5cm]
+	\huge{Chatovací systém} \\[2.5cm]
+	\Large{Tomáš Maršálek, A10B0632P} \\
+	\large{marsalet@students.zcu.cz} \\[1cm]
+	\normalsize{\today}
+\end{center}
+\thispagestyle{empty}
+\end{titlepage}
+
+\section{Zadání}
+7. Chatovací systém. Realizujte programy serveru a klienta pro chatování.
+Chatovaní server a klient bude podporovat přihlášení uživatele pod přezdívkou,
+komunikaci s ostatními uživateli, pouze s jedním definovaným uživatelem a
+odhlášení uživatele.  Protokol bude obsahovat příkazy LOGIN, LOGOUT, ALL\_MSG,
+PRIV\_MSG, USERS, PING a odpovědi OK a ERR.
+
+\section{Chatovací protokol}
+\subsection{Přihlášení a odhlášení}
+Po navázání spojení se serverem je nutné se přihlásit, aby si uživatele server přidal do seznamu.
+
+Formát přihlašovací zprávy je:
+\begin{verbatim}
+LOGIN <jméno>
+\end{verbatim}
+
+Za uživatelské jméno bude použito první slovo které následuje za $LOGIN$. Není
+možné používat jméno o více slovech. Pokud se přihlášení podařilo, tzn. jméno
+již není používáno nebo nedošlo k jiným potížím, dostaneme odpověď $OK$ a od
+této chvíle můžeme používat všechny funkce protokolu. V případě chybové
+odpovědi $ERR$ můžeme opakovat přihlášení nebo ukončit spojení. K chatovací
+funkcionalitě protokolu se ale nedostaneme přes správné přihlášení.
+
+Pro odhlášení použijeme zprávu:
+\begin{verbatim}
+LOGOUT
+\end{verbatim}
+Pokud ukončíme spojení bez poslání této zprávy, server tento stav rozpozná a
+uživatel je odstraněn ze seznamu uživatelů i bez korektního odhlášení.
+Uživatelské jméno tak není zbytečně obsazeno.
+
+\subsection{Formát vyměňovaných zpráv}
+Uživatelé mohou komunikovat prostřednictvím veřejné nebo soukromé zprávy.
+Veřejná zpráva je rozeslána všem uživatelům mimo odesílatele. Ve svém klientovi
+tedy nedostane duplikátní zprávu.
+\begin{verbatim}
+ALL_MSG <zpráva>
+\end{verbatim}
+Veřejnou zprávu odešleme jednoduše pomocí tohoto dotazu. Zpráva může mít
+maximální délku 2000 znaků, záleží na nastavení serveru.
+
+Soukromou zprávu odešleme podobným příkazem, jen dodáme jméno příjemce.
+\begin{verbatim}
+PRIV_MSG <příjemce> <zpráva>
+\end{verbatim}
+
+Chceme-li si ověřit spojení se serverem, pošleme zprávu $PING$. Server jednoduše
+odpoví zprávou $OK$.
+
+Důležitou součástí protokolu je zjištění přihlášených uživatelů. Mohlo by se
+zdát, že jde pouze o dodatečnou informaci, ale pro posílání soukromých zprávu
+se jedná o nezbytnou funkcionalitu. Jednoduše pošleme požadavek na seznam uživatelů.
+
+\begin{verbatim}
+USERS
+\end{verbatim}
+
+Odpovědí je prostý seznam přihlášených uživatelů bez jakýchkoliv dodatečných
+informací.
+\begin{verbatim}
+Pepa
+Magda
+Honza
+Jirka
+Luboš
+Václav
+Jiřina
+\end{verbatim}
+
+\section{Implementace} % TODO fakt?
+\subsection{Server}
+Server je C program využívající knihovnu Berkeley socketů a vláknovou knihovnu
+pthread. 
+
+Při inicializaci je vytvořen socket, který je připojen na výchozí nebo předem
+zvolený port. Celý program je jeden nekonečný cyklus, který je obsluhován
+funkcí $select$. Ta v každé iteraci cyklu vybere ten socket, ze kterého přišla
+zpráva. V případě tohoto serveru existují dva typy socketů. Jedním z nich je
+naslouchající socket, který přijímá nová spojení. Navázanému spojení je
+přiřazen druhý typ socketu - uživatelský, ten odpovídá právě jednomu uživateli.
+Server si uchovává seznam všech přihlášených uživatelů, jejich uživatelské
+jméno a uživatelský socket, přes který s ním komunikuje. Pokud $select$ vybere
+naslouchající socket, pouze vytvoří nový uživatelský socket a server čeká,
+dokud z něj nepřijde požadavek o přihlášení. Po úspěšném přihlášení je přidán
+do seznamu přihlášených uživatelů. V opačném případě, kdy $select$ vybere
+uživatelský socket, server vyhodnotí požadavek a patřičně se zachová podle výše
+uvedeného protokolu.
+
+\subsection{Datové struktury}
+Kromě uchovávání seznamu uživatelů je program relativně jednoduchý v ohledu
+uchovávání dat. Data o uživately jsou uchována ve struktuře $user$, která nese
+údaje o jeho přihlašovacím jménu a socketu, přes který s ním probíhá
+komunikace. Díky funkci $getpeername()$ zjistíme IP adresu až když ji
+potřebujeme, není třeba ji uchovávat, ale samozřejmě by to bylo možné.  Všichni
+užavetelé jsou uchováni ve spojovém seznamu. Není očekáváno veliké množství
+přihlášených uživatelů, proto složitější struktury by ani neměly příliš velký
+dopad na efektivitu. V praxi se na vytížených chatovacích serverech setkáme s
+počtem uživatelů v řádech stovek, pro vyšší počty už by bylo vhodné použít
+stromové nebo hashovací struktury.
+
+
+\section{Logování}
+\subsection{Hlavní log}
+Pro logování požadavků je vyhrazen speciální
+soubor $server.log$, který loguje každý požadavek jako čas požadavku, IP adresu
+žadatele a zprávu požadavku.
+
+\subsection{Statistika}
+Server si uchovává údaje o počtu přenesených bytů, počtu přenesených zpráv,
+počtu navázaných spojení, počtu úspěšných i neúspěšných přihlášení, době běhu a
+počet přenosů zrušených kvůli chybě. Tuto informaci zjistíme v interaktivním
+módu. 
+
+\section{Použité nástroje a prostředí}
+Obě aplikace klienta i serveru byly vyvíjeny pod systémem GNU/Linux. Klient byl
+vyvinut za pomoci IDE Eclipse, pro které byla prvotně vyvinuta GUI knihovna
+SWT. Server a makefile byly napsány ve Vimu.
+% TODO swt fakt?
+
+
+\section{Uživatelká příručka}
+Abychom vyzkoušeli tento chatovací protokol, musíme spustit server na určitém
+portu a následně můžeme připojit libovolné množství klientů.
+
+\subsection{Server}
+\subsubsection{Přeložení}
+Server je napsán v jazyce C pro Unixové prostředí. V adresáři se zdrojovými
+soubory přeložíme buď pomocí build skriptu
+\begin{verbatim}
+$ make
+\end{verbatim}
+
+nebo ručně
+\begin{verbatim}
+$ gcc -pthread -o server *.c
+\end{verbatim}
+
+\subsubsection{Spuštění}
+Server spustíme bez parametrů, bude použit výchozí port 1234. Port si můžeme zvolit spuštěním serveru s parametrem portu.
+
+\begin{verbatim}
+$ ./server
+$ ./server 12345
+\end{verbatim}
+
+\subsubsection{Ovládání}
+Po spuštění bude server běžet na pozadí interaktivního programu představenému
+uživateli. Pomocí něj může nenásilně ukončit server, získat informace o
+vyměněných datech nebo získat seznam právě přihlášených uživatelů.
+
+
+\subsection{Klient}
+Klient je program s grafickým uživatelským rozhraním v jazyce Java a využívá
+GUI knihovnu SWT.
+\subsubsection{Přeložení}
+\subsubsection{Spuštění}
+Protože se jedná o Java aplikaci, spuštění provedeme z konzole 
+\begin{verbatim}
+$ java -jar client.jar
+\end{verbatim}
+
+\subsubsection{Ovládání}
+Při spuštění je uživateli představeno okno s jedinou možností - $Connection$,
+kde vybere položku $Connect to$. Po zadání parametrů serveru (adresa, port a
+uživatelské jméno) a potvrzení je při zadání korektních údajích a ještě
+nepoužitého uživatelského jména úspěšně připojen a rovnou přihlášen, nemusí se
+starat o záležitosti jako $LOGIN$ a $LOGOUT$.
+\end{document}

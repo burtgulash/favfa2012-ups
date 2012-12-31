@@ -33,6 +33,16 @@ pthread_mutex_t users_lock;
 
 static int bytes_sent = 0;
 static int bytes_received = 0;
+static int messages_sent = 0;
+static int messages_received = 0;
+
+static int successful_accepts = 0;
+static int unsuccessful_accepts = 0;
+static int successful_logins = 0;
+static int unsuccessful_logins = 0;
+static int error_count = 0;
+
+static time_t start_time;
 
 // List of users.
 static user *users = NULL;
@@ -40,6 +50,8 @@ static user *users = NULL;
 static void *interactive_loop(void *ptr)
 {
 	char input[50];
+	unsigned long t;
+	time_t end_time;
 
 	while(1) {
 		printf("[t]erm to terminate server.\n");
@@ -57,8 +69,22 @@ static void *interactive_loop(void *ptr)
 
 			break;
 		} else if (input && (input[0] == 'd' || strcmp(input, "data") == 0)) {
+			end_time = time(NULL);
+			t = (unsigned long) difftime(end_time, start_time);
+
+			printf("uptime: %02lu:%02lu:%02lu\n", t / 3600, (t / 60) % 60, t % 60);
+			printf("\n");
+			printf("%7d messages sent.\n", messages_sent);
+			printf("%7d messages received.\n", messages_received);
 			printf("%7d bytes sent.\n", bytes_sent);
 			printf("%7d bytes received.\n", bytes_received);
+			printf("\n");
+			printf("%7d connections established.\n", successful_accepts);
+			printf("%7d connections refused.\n", unsuccessful_accepts);
+			printf("%7d successful logins.\n", successful_logins);
+			printf("%7d unsuccesful logins.\n", unsuccessful_logins);
+			printf("\n");
+			printf("%7d request errors.\n", error_count);
 			printf("\n");
 		} else if (input && (input[0] == 'u' || strcmp(input, "users") == 0)) {
 			user *i;
@@ -170,6 +196,7 @@ static char *concatenate(int n, ...)
 
 static int logged_send(int s, const void *buf, size_t len)
 {
+	messages_sent ++;
 	bytes_sent += len;
 	return send(s, buf, len, 0);
 }
@@ -181,6 +208,7 @@ static int logged_recv(int s, void *buf, size_t len)
 	received_now = recv(s, buf, len, 0);
 	if (received_now > 0) {
 		bytes_received += received_now;
+		messages_received ++;
 
 		// Strip newlines and log.
 		char *tmp_log = (char *) malloc(sizeof(char) * (received_now + 1));
@@ -204,6 +232,7 @@ static void send_ok(int s)
 
 static void send_err(int s)
 {
+	error_count ++;
 	logged_send(s, "ERR\n", 4);
 }
 
@@ -336,15 +365,6 @@ int main(int argc, char **argv)
 	pthread_t interactive;
 
 
-	// Init mutexes.
-	pthread_mutex_init(&terminate_lock, NULL);
-	pthread_mutex_init(&users_lock, NULL);
-
-	if (pthread_create(&interactive, NULL, interactive_loop, NULL) == -1) {
-		fprintf(stderr, "Couldn't initiate interactive mode\n");
-		exit(1);
-	}
-
 
 
 	// Fixes this: sends crash on SIGPIPE when remote disconnects mid send.
@@ -356,6 +376,17 @@ int main(int argc, char **argv)
 		port = DEFAULT_PORT;
 	else 
 		fprintf(stderr, "too many arguments.\n");
+
+
+	start_time = time(NULL);
+	// Init mutexes.
+	pthread_mutex_init(&terminate_lock, NULL);
+	pthread_mutex_init(&users_lock, NULL);
+
+	if (pthread_create(&interactive, NULL, interactive_loop, NULL) == -1) {
+		fprintf(stderr, "Couldn't initiate interactive mode\n");
+		exit(1);
+	}
 
 
 	memset(&hints, 0, sizeof hints);
@@ -436,12 +467,14 @@ int main(int argc, char **argv)
 					newfd = accept(listener_fd, 
 							(struct sockaddr*) &their_addr, &addrlen);
 
-					if (newfd == -1)
+					if (newfd == -1) {
 						perror("accept");
-					else {
+						unsuccessful_accepts ++;
+					} else {
 						FD_SET(newfd, &master_fds);
 						if (newfd > maxfd)
 							maxfd = newfd;
+						successful_accepts ++;
 					}
 				} else if (from == NULL) {
 					char *stripped = parse_request(s, buf, sizeof buf - 1, &cmd_set, &hangup);
@@ -466,15 +499,16 @@ int main(int argc, char **argv)
 						{
 							user_add(&users, user_name, s);
 							send_ok(s);
+							successful_logins ++;
 							server_log(s, "%s logged in.\n", user_name);
 
 							char *res = get_users_list(&users);
 							send_to_all(&users, NULL, res, strlen(res));
 							free(res);
-
 						} else {
 							free(user_name);
 							send_err(s);
+							unsuccessful_logins ++;
 						}
 					} else
 						send_err(s);
