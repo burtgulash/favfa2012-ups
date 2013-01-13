@@ -47,11 +47,34 @@ static time_t start_time;
 // List of users.
 static user *users = NULL;
 
+static void fprint_info(FILE *file) {
+	unsigned long t;
+	time_t end_time;
+
+	end_time = time(NULL);
+	t = (unsigned long) difftime(end_time, start_time);
+
+	fprintf(file, "\n");
+	fprintf(file, "uptime: %02lu:%02lu:%02lu\n", t / 3600, (t / 60) % 60, t % 60);
+	fprintf(file, "\n");
+	fprintf(file, "%7d messages sent.\n", messages_sent);
+	fprintf(file, "%7d messages received.\n", messages_received);
+	fprintf(file, "%7d bytes sent.\n", bytes_sent);
+	fprintf(file, "%7d bytes received.\n", bytes_received);
+	fprintf(file, "\n");
+	fprintf(file, "%7d connections established.\n", successful_accepts);
+	fprintf(file, "%7d connections refused.\n", unsuccessful_accepts);
+	fprintf(file, "%7d successful logins.\n", successful_logins);
+	fprintf(file, "%7d unsuccesful logins.\n", unsuccessful_logins);
+	fprintf(file, "\n");
+	fprintf(file, "%7d request errors.\n", error_count);
+	fprintf(file, "\n");
+}
+
 static void *interactive_loop(void *ptr)
 {
 	char input[50];
-	unsigned long t;
-	time_t end_time;
+	FILE *file;
 
 	while(1) {
 		printf("[t]erm to terminate server.\n");
@@ -67,25 +90,22 @@ static void *interactive_loop(void *ptr)
 			terminated = 1;
 			pthread_mutex_unlock(&terminate_lock);
 
+			if (!log_exists) {
+				file = fopen(LOG_FILE, "w");
+				log_exists = 1;
+			} else
+				file = fopen(LOG_FILE, "a");
+
+			if (file == NULL) {
+				log_exists = 0;
+			} else {
+				fprint_info(file);
+				fclose(file);
+			}
+
 			break;
 		} else if (*input && (input[0] == 'd' || strcmp(input, "data") == 0)) {
-			end_time = time(NULL);
-			t = (unsigned long) difftime(end_time, start_time);
-
-			printf("uptime: %02lu:%02lu:%02lu\n", t / 3600, (t / 60) % 60, t % 60);
-			printf("\n");
-			printf("%7d messages sent.\n", messages_sent);
-			printf("%7d messages received.\n", messages_received);
-			printf("%7d bytes sent.\n", bytes_sent);
-			printf("%7d bytes received.\n", bytes_received);
-			printf("\n");
-			printf("%7d connections established.\n", successful_accepts);
-			printf("%7d connections refused.\n", unsuccessful_accepts);
-			printf("%7d successful logins.\n", successful_logins);
-			printf("%7d unsuccesful logins.\n", unsuccessful_logins);
-			printf("\n");
-			printf("%7d request errors.\n", error_count);
-			printf("\n");
+			fprint_info(stdout);
 		} else if (*input && (input[0] == 'u' || strcmp(input, "users") == 0)) {
 			user *i;
 
@@ -107,10 +127,11 @@ static void server_log(int s, const char *what, ...)
 	time_t rawtime;
 	struct tm *timeinfo;
 	char *asc;
-	char ip[INET6_ADDRSTRLEN];
+	char ip[INET6_ADDRSTRLEN + 1];
 	socklen_t len;
 	struct sockaddr_storage addr;
 	FILE *file;
+	int print_ip = 1;
 	va_list args;
 
 	memset(ip, ' ', sizeof ip);
@@ -125,6 +146,8 @@ static void server_log(int s, const char *what, ...)
 			struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *) &addr;
 			inet_ntop(AF_INET6, &ipv6->sin6_addr, ip, sizeof ip);
 		}
+	} else {
+		print_ip = 0;
 	}
 
 	if (!log_exists) {
@@ -141,7 +164,8 @@ static void server_log(int s, const char *what, ...)
 		asc = asctime(timeinfo);
 		asc[strlen(asc) - 1] = '\0';
 
-		fprintf(file, "%s -- ", ip);
+		if (print_ip)
+			fprintf(file, "%s -- ", ip);
 
 		fprintf(file, "[%s] ", asc);
 
@@ -495,6 +519,7 @@ int main(int argc, char **argv)
 						char *c = strtok(stripped, " ");
 						char *user_name = (char *) malloc(sizeof(char) * (strlen(c) + 1));
 						strcpy(user_name, c);
+						user_name[strlen(user_name)] = '\0';
 
 						if (user_name 
 							&& strlen(user_name) > 0
@@ -513,8 +538,9 @@ int main(int argc, char **argv)
 							send_err(s);
 							unsuccessful_logins ++;
 						}
-					} else
+					} else {
 						send_err(s);
+					}
 				} else {
 					char *stripped = parse_request(s, buf, sizeof buf - 1, &cmd_set, &hangup);
 
@@ -528,8 +554,10 @@ int main(int argc, char **argv)
 								free(broken->name);
 								free(broken);
 							}
-						} else
-							send_err(from->socket);
+						} else {
+							// too many bullshit error messages when on.
+							// send_err(from->socket);
+						}
 
 						break;
 					}
@@ -590,12 +618,16 @@ int main(int argc, char **argv)
 								break;
 							}
 
-							c = strtok(NULL, " ");
-							if (c == NULL) {
+							while (*c && *c++ != ' ')
+								;
+
+							while (*c++ == ' ')
+								;
+
+							if (*c == '\0') {
 								send_err(from->socket);
 								break;
 							}
-							c[strlen(c)] = '\0';
 
 							from_msg = concatenate(5, "PRIV_MSG ", from->name, " ", c, "\n");
 
