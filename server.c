@@ -224,7 +224,17 @@ static int logged_send(int s, const void *buf, size_t len)
 {
 	messages_sent ++;
 	bytes_sent += len;
-	return send(s, buf, len, 0);
+	int status = send(s, buf, len, 0);
+
+	if (status == -1) {
+		user *u = user_rm(&users, NULL, &s);
+		if (u != NULL) {
+			free(u->name);
+			free(u);
+		}
+	}
+
+	return status;
 }
 
 static int logged_recv(int s, void *buf, size_t len)

@@ -1,37 +1,101 @@
-127.0.0.1 -- [Sun Jan 13 12:42:04 2013] LOGIN gusta
-127.0.0.1 -- [Sun Jan 13 12:42:04 2013] gusta logged in.
-127.0.0.1 -- [Sun Jan 13 12:42:08 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:13 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:18 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:24 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:29 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:34 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:40 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:45 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:50 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:54 2013] ALL_MSG d
-127.0.0.1 -- [Sun Jan 13 12:42:56 2013] ALL_MSG e
-127.0.0.1 -- [Sun Jan 13 12:42:56 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:42:56 2013] ALL_MSG e
-127.0.0.1 -- [Sun Jan 13 12:43:01 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:43:06 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:43:07 2013] LOGIN gusta
-127.0.0.1 -- [Sun Jan 13 12:43:12 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:43:17 2013] USERS
-127.0.0.1 -- [Sun Jan 13 12:43:22 2013] LOGOUT
-127.0.0.1 -- [Sun Jan 13 12:43:22 2013] gusta logged out.
+127.0.0.1 -- [Tue Jan 15 22:13:52 2013] LOGIN gusta
+127.0.0.1 -- [Tue Jan 15 22:13:52 2013] gusta logged in.
+127.0.0.1 -- [Tue Jan 15 22:13:52 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:13:55 2013] LOGIN pepa
+127.0.0.1 -- [Tue Jan 15 22:13:55 2013] pepa logged in.
+127.0.0.1 -- [Tue Jan 15 22:13:55 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:13:56 2013] LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:13:56 2013] pepa logged out.
+127.0.0.1 -- [Tue Jan 15 22:13:56 2013] LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:13:57 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:00 2013] LOGIN gustaa
+127.0.0.1 -- [Tue Jan 15 22:14:00 2013] gustaa logged in.
+127.0.0.1 -- [Tue Jan 15 22:14:00 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:02 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:03 2013] LOGIN pepa
+127.0.0.1 -- [Tue Jan 15 22:14:03 2013] pepa logged in.
+127.0.0.1 -- [Tue Jan 15 22:14:03 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:05 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:06 2013] LOGIN pepe
+127.0.0.1 -- [Tue Jan 15 22:14:06 2013] pepe logged in.
+127.0.0.1 -- [Tue Jan 15 22:14:06 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:07 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:08 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:09 2013] ALL_MSG e
+127.0.0.1 -- [Tue Jan 15 22:14:10 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:12 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:12 2013] ALL_MSG ueauoe
+127.0.0.1 -- [Tue Jan 15 22:14:13 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:13 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:13 2013] LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:14:13 2013] gusta logged out.
+127.0.0.1 -- [Tue Jan 15 22:14:13 2013] LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:14:15 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:16 2013] LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:14:16 2013] gustaa logged out.
+127.0.0.1 -- [Tue Jan 15 22:14:16 2013] LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:14:17 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:18 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:18 2013] LOGIN gusta
+127.0.0.1 -- [Tue Jan 15 22:14:18 2013] gusta logged in.
+127.0.0.1 -- [Tue Jan 15 22:14:18 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:19 2013] LOGOUT
+LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:14:19 2013] gusta logged out.
+127.0.0.1 -- [Tue Jan 15 22:14:19 2013] LOGIN gusta
+127.0.0.1 -- [Tue Jan 15 22:14:19 2013] gusta logged in.
+127.0.0.1 -- [Tue Jan 15 22:14:22 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:23 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:27 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:29 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:33 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:34 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:38 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:39 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:43 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:45 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:49 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:50 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:54 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:55 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:14:59 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:01 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:05 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:06 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:08 2013] ALL_MSG pepa
+127.0.0.1 -- [Tue Jan 15 22:15:10 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:11 2013] ALL_MSG roro
+127.0.0.1 -- [Tue Jan 15 22:15:11 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:13 2013] LOGOUT
+[Tue Jan 15 22:15:13 2013] pepe logged out.
+[Tue Jan 15 22:15:13 2013] 
+LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:15:15 2013] LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:15:15 2013] pepa logged out.
+127.0.0.1 -- [Tue Jan 15 22:15:15 2013] 
+LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:15:15 2013] LOGIN pepa
+127.0.0.1 -- [Tue Jan 15 22:15:15 2013] pepa logged in.
+127.0.0.1 -- [Tue Jan 15 22:15:19 2013] LOGIN gusta
+127.0.0.1 -- [Tue Jan 15 22:15:19 2013] LOGOUT
+127.0.0.1 -- [Tue Jan 15 22:15:25 2013] LOGIN gustaao
+127.0.0.1 -- [Tue Jan 15 22:15:25 2013] gustaao logged in.
+127.0.0.1 -- [Tue Jan 15 22:15:25 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:30 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:36 2013] USERS
+127.0.0.1 -- [Tue Jan 15 22:15:41 2013] USERS
 
-uptime: 00:01:29
+uptime: 00:04:03
 
-     20 messages sent.
-     40 messages received.
-    198 bytes sent.
-    145 bytes received.
+    121 messages sent.
+    130 messages received.
+   1959 bytes sent.
+    513 bytes received.
 
-      2 connections established.
+     10 connections established.
       0 connections refused.
-      1 successful logins.
+      9 successful logins.
       1 unsuccesful logins.
 
-      3 request errors.
+     20 request errors.
 
